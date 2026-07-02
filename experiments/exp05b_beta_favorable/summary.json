@@ -1,0 +1,94 @@
+{
+  "simulation_rounds": 2000,
+  "target_value": 50.0,
+  "final_consensus": 46.17452004039939,
+  "final_error": 3.8254799596006066,
+  "final_confidence": 0.7146075008446895,
+  "alive_modules": 3,
+  "total_proposals": 6000,
+  "total_energy_earned": 30000.000000002517,
+  "total_energy_spent": 32367.0,
+  "fallback_count": 0,
+  "dream_count": 400,
+  "death_count": 0,
+  "module_summaries": {
+    "alpha_aggressive": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 2.666666666666667,
+        "total_earned": 8477.70263832089,
+        "total_spent": 10768.0,
+        "loan_balance": 0,
+        "loan_rounds_remaining": 0,
+        "struggling": true
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 65.01385635737192
+    },
+    "beta_conservative": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 2434.676813029776,
+        "total_earned": 13134.176813029473,
+        "total_spent": 10799.5,
+        "loan_balance": 0.0,
+        "loan_rounds_remaining": 0,
+        "struggling": false
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 45.42866065939098
+    },
+    "gamma_counter": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 2.666666666666667,
+        "total_earned": 8388.12054864975,
+        "total_spent": 10799.5,
+        "loan_balance": 0,
+        "loan_rounds_remaining": 0,
+        "struggling": true
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 50.4834432893165
+    }
+  },
+  "fallback_summary": {
+    "fallback_count": 0,
+    "shadow_state": "idle",
+    "last_fallback": null
+  },
+  "dream_summary": {
+    "dream_count": 400,
+    "distilled_rules_count": 1200,
+    "last_dream": {
+      "round": 2000,
+      "dream_id": 400,
+      "distilled_rules": [
+        "[alpha_aggressive] avg=65.01, trend=-6.12, volatility=90.60",
+        "[beta_conservative] avg=45.43, trend=12.86, volatility=39.98",
+        "[gamma_counter] avg=50.48, trend=-7.30, volatility=62.94"
+      ],
+      "hybrids": []
+    }
+  },
+  "death_summary": {
+    "total_deaths": 0,
+    "archaeology_count": 0,
+    "discarded_count": 0,
+    "death_events": []
+  },
+  "consensus_summary": {
+    "current_value": 46.17452004039939,
+    "current_confidence": 0.7146075008446895,
+    "change_rate": 0.04505008247120543,
+    "shadow_active": false,
+    "shadow_value": null,
+    "history_length": 2000
+  }
+}

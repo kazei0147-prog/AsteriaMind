@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from .config import HiveMindConfig
 from .energy import EnergyWallet
-from .submodule import SubModule, AggressiveModule, CounterConsensusModule, Proposal
+from .submodule import SubModule, AggressiveModule, ConservativeModule, CounterConsensusModule, Proposal
 from .consensus import ConsensusTracker, ConsensusState
 from .fallback import FallbackController
 from .dream import DreamMechanism
@@ -54,8 +54,9 @@ class MotherModule:
 
         # ── 子模块 ──
         self.modules: List[SubModule] = [
-            AggressiveModule(config),      # alpha (+1)
-            CounterConsensusModule(config), # gamma (-1)
+            AggressiveModule(config),       # alpha (aggressive)
+            ConservativeModule(config),     # beta (conservative) — v0.2 新增
+            CounterConsensusModule(config), # gamma (counter_consensus)
         ]
 
         # ── 共识追踪器 ──
@@ -102,22 +103,35 @@ class MotherModule:
     def _stagger_collection(self) -> dict:
         """
         错峰采集：不同模块在不同时间窗口采集数据。
-        激进型采集最新数据，反共识型采集稍早数据 + 共识信息。
+        alpha：使用最新观测（激进追逐新信号）
+        beta：使用稍延迟观测 + 共识锚定参考（保守审慎）
+        gamma：使用稍早观测（反共识需要"距离感"）
         """
         latest_obs = self._generate_observation()
 
-        # 激进型：使用最新观测
-        # 反共识型：使用稍早的观测（模拟延迟采集）
-        if len(self.data_buffer) > 0:
-            delayed_obs = random.choice(self.data_buffer[-3:]) if len(self.data_buffer) >= 3 else self.data_buffer[-1]
+        # alpha：最新观测
+        alpha_obs = latest_obs
+
+        # beta：稍延迟观测（保守型不追最新信号）
+        if len(self.data_buffer) > 1:
+            beta_obs = self.data_buffer[-2]  # 用上一轮数据（延迟一轮）
         else:
-            delayed_obs = latest_obs
+            beta_obs = latest_obs * self.config.conservative_bias  # 第一轮直接低估
+
+        # gamma：稍早观测（延迟更大，需要"距离感"做反向推演）
+        if len(self.data_buffer) > 2:
+            gamma_obs = random.choice(self.data_buffer[-3:])
+        elif len(self.data_buffer) > 0:
+            gamma_obs = self.data_buffer[-1]
+        else:
+            gamma_obs = latest_obs
 
         self.data_buffer.append(latest_obs)
 
         return {
-            "alpha_aggressive": latest_obs,
-            "gamma_counter": delayed_obs,
+            "alpha_aggressive": alpha_obs,
+            "beta_conservative": beta_obs,
+            "gamma_counter": gamma_obs,
         }
 
     def run_round(self) -> dict:
@@ -155,18 +169,22 @@ class MotherModule:
         # ── 4. 评估与采纳 ──
         new_consensus = self.consensus.update(proposals, self.round_num)
 
-        # 分发能量奖励
+        # 分发能量奖励（v0.2: 比例奖励，而非平均共享）
+        # 每个模块按其置信度权重占比分配奖励
+        # 高置信度模块贡献更大 → 赚更多 → 真正的竞争经济
         if proposals and new_consensus.contributors:
-            reward_per_module = self.config.adoption_reward / len(new_consensus.contributors)
-            for p in proposals:
-                if p.module_id in new_consensus.contributors:
-                    # 找到对应模块并奖励
-                    for m in self.modules:
-                        if m.module_id == p.module_id and m.alive:
-                            m.on_adopted(reward_per_module)
-                            self.stats["total_energy_earned"] += reward_per_module
-                            self.stats["total_adoptions_by_module"][p.module_id] = \
-                                self.stats["total_adoptions_by_module"].get(p.module_id, 0) + 1
+            contributor_proposals = [p for p in proposals if p.module_id in new_consensus.contributors]
+            total_weight = sum(p.confidence for p in contributor_proposals)
+
+            for p in contributor_proposals:
+                proportion = p.confidence / total_weight if total_weight > 0 else 1.0 / len(contributor_proposals)
+                individual_reward = self.config.adoption_reward * proportion
+                for m in self.modules:
+                    if m.module_id == p.module_id and m.alive:
+                        m.on_adopted(individual_reward)
+                        self.stats["total_energy_earned"] += individual_reward
+                        self.stats["total_adoptions_by_module"][p.module_id] = \
+                            self.stats["total_adoptions_by_module"].get(p.module_id, 0) + 1
 
         round_log["consensus_value"] = new_consensus.value
         round_log["consensus_confidence"] = new_consensus.confidence
@@ -203,6 +221,7 @@ class MotherModule:
                 "alive": m.alive,
                 "energy_balance": m.wallet.balance,
                 "loan_balance": m.wallet.loan_balance,
+                "struggling": m.wallet.struggling,
                 "adoption_count": m.adoption_count,
                 "total_rounds": m.total_rounds,
                 "last_proposal_value": m.last_proposal.value if m.last_proposal else None,

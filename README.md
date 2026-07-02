@@ -155,15 +155,19 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 
 ## 六、当前状态
 
-**v0.1：架构蓝图 + MVP 原型已完成。**
+**v0.2：三模块架构（alpha + beta + gamma）已完成 + 两个结构性 bug 修复。**
 
 - [x] 核心机制定义
 - [x] 能量经济学模型
 - [x] 保底与遗忘协议
 - [x] 通信与调度框架
 - [x] 最小可行原型（MVP）代码 → [`src/hivemind/`](src/hivemind/)
-- [x] 单机运行测试 → 4 组实验已完成，详见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)
-- [ ] 保守型（beta）模块实现 — 已确认为结构性必需
+- [x] v0.1 单机运行测试 → 4 组实验已完成
+- [x] v0.2 保守型（beta）模块实现
+- [x] v0.2 修复 energy_floor 僵尸 bug（floor 改"挣扎线"）
+- [x] v0.2 修复置信度衰减 bug（累积衰减+部分恢复）
+- [x] v0.2 修复奖励分配 bug（比例分配）
+- [x] v0.2 三模块 2000 轮验证 → 2 组实验已完成，详见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)
 - [ ] 离线环境适配
 - [ ] 实际场景验证
 
@@ -197,9 +201,9 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 | 文件 | 模块 | 说明 |
 |------|------|------|
 | `config.py` | HiveMindConfig | 可调参数 |
-| `energy.py` | EnergyWallet | 能量会计（支出/收入/借贷/地板） |
-| `submodule.py` | Alpha + Gamma | 激进型（1.3x偏见）+ 反共识型 |
-| `consensus.py` | ConsensusTracker | 共识追踪（值 + 置信度 + 历史） |
+| `energy.py` | EnergyWallet | 能量会计（支出/收入/借贷/挣扎线） |
+| `submodule.py` | Alpha + Beta + Gamma | 激进型（1.3x偏见）+ 保守型（0.7x锚定）+ 反共识型 |
+| `consensus.py` | ConsensusTracker | 共识追踪（值 + 累积置信度衰减 + 历史） |
 | `fallback.py` | FallbackController | 保底机制（影子候选） |
 | `dream.py` | DreamMechanism | 梦境（蒸馏 + 杂交） |
 | `death.py` | DeathProtocol | 临终协议（遗产胶囊） |
@@ -209,10 +213,12 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 
 | 目录 | 实验 | 轮数 | 关键发现 |
 |------|------|------|----------|
-| `exp01_default_convergence` | 默认参数 | 200 | 完美收敛（误差 0.14） |
-| `exp02_stress_test` | 高噪声+低奖励 | 200 | 双模块破产，系统崩溃 |
-| `exp03_longterm_validation` | 中等压力 | 2000 | alpha 第38轮成僵尸，结构性缺陷 |
-| `exp04_alpha_rescue` | 调参救活 alpha | 500 | alpha 第65轮仍死，确认缺 beta |
+| `exp01_default_convergence` | v0.1 默认参数 | 200 | 完美收敛（误差 0.14） |
+| `exp02_stress_test` | v0.1 高噪声+低奖励 | 200 | 双模块破产，系统崩溃 |
+| `exp03_longterm_validation` | v0.1 中等压力 | 2000 | alpha 第38轮成僵尸，结构性缺陷 |
+| `exp04_alpha_rescue` | v0.1 调参救活 alpha | 500 | alpha 第65轮仍死，确认缺 beta |
+| `exp05_beta_validation` | v0.2 三模块中等压力 | 2000 | 修bug成功（fallback 12次），但低奖励下beta/gamma 死 |
+| `exp05b_beta_favorable` | v0.2 三模块高奖励 | 2000 | **3模块全部存活2000轮** |
 
 完整实验报告见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)。
 
@@ -239,4 +245,4 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 
 ---
 
-*Last updated: 2026-07-01*
+*Last updated: 2026-07-02 (v0.2: beta module + 2 bug fixes)*

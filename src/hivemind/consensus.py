@@ -3,6 +3,10 @@
 
 跟踪当前共识值和置信度。
 置信度随时间衰减，触发保底机制。
+
+v0.2 修复：置信度累积衰减而非每轮重置
+- 每轮先衰减，再从提议中部分恢复（30/70 混合）
+- 僵化时额外惩罚 → 保底机制能真正触发
 """
 
 from dataclasses import dataclass, field
@@ -29,11 +33,10 @@ class ConsensusTracker:
     """
     共识追踪与置信度衰减管理。
 
-    核心逻辑：
-    1. 每轮收集模块提议，加权汇总形成共识
-    2. 共识置信度每轮按 decay_rate 衰减
-    3. 低置信度触发保底机制
-    4. 低优先级内容定期被重新激活
+    v0.2 核心修复：
+    1. 置信度累积衰减：每轮先衰减再部分恢复，不再被提议完全重置
+    2. 僵化惩罚：共识变化率低于阈值时额外衰减
+    3. 保底机制因此能真正触发
     """
 
     def __init__(self, config: HiveMindConfig, initial_value: float = 0.0):
@@ -48,15 +51,25 @@ class ConsensusTracker:
         """
         基于模块提议更新共识。
         加权平均：置信度高的模块权重更大。
+
+        v0.2 置信度逻辑：累积衰减 + 部分恢复 + 僵化惩罚
         """
+        # ── Step 1: 置信度先衰减（不论有无提议）──
+        decayed_confidence = self.current.confidence * (1 - self.config.confidence_decay_rate)
+        decayed_confidence = max(decayed_confidence, 0.01)  # 保底最低值
+
         if not proposals:
-            # 无提议时，共识不变但置信度继续衰减
-            self._decay_confidence()
-            self.current.round_number = round_num
+            # 无提议时：只有衰减，无恢复
+            self.current = ConsensusState(
+                value=self.current.value,
+                confidence=decayed_confidence,
+                round_number=round_num,
+                change_rate=0.0,
+            )
             self.history.append(self._snapshot())
             return self.current
 
-        # 加权平均
+        # ── Step 2: 加权平均计算新共识值 ──
         total_weight = 0.0
         weighted_sum = 0.0
         contributors = []
@@ -69,15 +82,27 @@ class ConsensusTracker:
 
         new_value = weighted_sum / total_weight if total_weight > 0 else self.current.value
 
-        # 计算变化率
+        # ── Step 3: 从提议中部分恢复置信度 ──
+        proposal_confidence = self._compute_confidence_from_proposals(proposals)
+        # 混合：70% 来自累积衰减 + 30% 来自本轮提议
+        # 这让置信度真正累积，不会被提议完全重置
+        blended_confidence = 0.7 * decayed_confidence + 0.3 * proposal_confidence
+
+        # ── Step 4: 僵化惩罚 ──
         change_rate = abs(new_value - self.current.value) / max(abs(self.current.value), 1.0)
 
-        # 置信度：基于提议覆盖度和模块置信度
-        new_confidence = self._compute_confidence(proposals)
+        if change_rate < self.config.dream_trigger_threshold:
+            stagnation_penalty = self.config.confidence_decay_rate * 3  # 僵化时三倍衰减
+            blended_confidence *= (1 - stagnation_penalty)
+            logger.debug(
+                f"共识僵化惩罚 round={round_num}: "
+                f"change_rate={change_rate:.6f} < {self.config.dream_trigger_threshold}, "
+                f"confidence={blended_confidence:.4f}"
+            )
 
         self.current = ConsensusState(
             value=new_value,
-            confidence=new_confidence,
+            confidence=blended_confidence,
             round_number=round_num,
             contributors=contributors,
             change_rate=change_rate,
@@ -85,26 +110,21 @@ class ConsensusTracker:
         self.history.append(self._snapshot())
         return self.current
 
-    def _compute_confidence(self, proposals: List) -> float:
-        """基于提议质量计算新置信度"""
-        if not proposals:
-            return self.current.confidence * (1 - self.config.confidence_decay_rate)
-
+    def _compute_confidence_from_proposals(self, proposals: List) -> float:
+        """基于提议质量计算本轮置信度（仅作为恢复来源，不再直接设为共识置信度）"""
         # 基础置信度 = 模块平均置信度
         avg_conf = sum(p.confidence for p in proposals) / len(proposals)
 
-        # 多样性加分：如果来自不同模块，置信度更高
+        # 多样性加分：来自更多不同模块 → 更可信
         unique_modules = len(set(p.module_id for p in proposals))
         diversity_bonus = 0.1 * min(unique_modules, 3)
 
-        # 与目标值的接近度加分（仅仿真用）
-        # 注意：真实系统不知道目标值，这里仅用于观测
         return min(avg_conf + diversity_bonus, 1.0)
 
     def _decay_confidence(self) -> None:
-        """置信度时间衰减"""
+        """置信度时间衰减（仅在无提议时使用）"""
         self.current.confidence *= (1 - self.config.confidence_decay_rate)
-        self.current.confidence = max(self.current.confidence, 0.01)  # 保底最低值
+        self.current.confidence = max(self.current.confidence, 0.01)
 
     def should_fallback(self) -> bool:
         """判断是否需要触发保底机制"""
@@ -131,7 +151,6 @@ class ConsensusTracker:
         self.shadow_value += perturbation * 0.5
 
         # 比较影子与主流
-        # 在仿真中，影子更接近目标值则更优
         advantage = self.shadow_value - self.current.value
 
         if self.shadow_rounds_active >= self.config.shadow_parallel_rounds:
@@ -147,8 +166,6 @@ class ConsensusTracker:
         - 主流仍优 → 影子退出
         """
         if shadow_advantage is not None:
-            # 简化判定：如果影子偏离方向更接近"修正方向"（在仿真中，接近目标）
-            # 这里用简单的距离比较
             if abs(shadow_advantage) < abs(self.current.value - self.config.target_value) * 0.5:
                 # 影子更接近目标，开始插值过渡
                 rate = self.config.interpolation_rate
