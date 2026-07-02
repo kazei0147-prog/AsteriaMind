@@ -155,7 +155,7 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 
 ## 六、当前状态
 
-**v0.2：三模块架构（alpha + beta + gamma）已完成 + 两个结构性 bug 修复。**
+**v0.3：四模块架构（alpha + beta + gamma + delta）已完成 + gamma/δ 命名归位。**
 
 - [x] 核心机制定义
 - [x] 能量经济学模型
@@ -168,6 +168,9 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 - [x] v0.2 修复置信度衰减 bug（累积衰减+部分恢复）
 - [x] v0.2 修复奖励分配 bug（比例分配）
 - [x] v0.2 三模块 2000 轮验证 → 2 组实验已完成，详见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)
+- [x] v0.3 复合型（delta）模块实现（30%激进/30%保守/40%中性混合策略）
+- [x] v0.3 gamma 继续当反共识（保持 v0.1/v0.2 数据连续性），delta 取复合型角色
+- [x] v0.3 四模块 2000 轮验证 → 2 组实验已完成
 - [ ] 离线环境适配
 - [ ] 实际场景验证
 
@@ -202,7 +205,7 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 |------|------|------|
 | `config.py` | HiveMindConfig | 可调参数 |
 | `energy.py` | EnergyWallet | 能量会计（支出/收入/借贷/挣扎线） |
-| `submodule.py` | Alpha + Beta + Gamma | 激进型（1.3x偏见）+ 保守型（0.7x锚定）+ 反共识型 |
+| `submodule.py` | Alpha + Beta + Gamma + Delta | 激进型（1.3x偏见）+ 保守型（0.7x锚定）+ 反共识型（延续v0.1/v0.2）+ 复合型（30/30/40混合策略）|
 | `consensus.py` | ConsensusTracker | 共识追踪（值 + 累积置信度衰减 + 历史） |
 | `fallback.py` | FallbackController | 保底机制（影子候选） |
 | `dream.py` | DreamMechanism | 梦境（蒸馏 + 杂交） |
@@ -219,6 +222,8 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 | `exp04_alpha_rescue` | v0.1 调参救活 alpha | 500 | alpha 第65轮仍死，确认缺 beta |
 | `exp05_beta_validation` | v0.2 三模块中等压力 | 2000 | 修bug成功（fallback 12次），但低奖励下beta/gamma 死 |
 | `exp05b_beta_favorable` | v0.2 三模块高奖励 | 2000 | **3模块全部存活2000轮** |
+| `exp06_four_module_validation` | v0.3 四模块中等奖励 | 2000 | 4模块全活但都挣扎（reward=15不够分） |
+| `exp06b_four_module_favorable` | v0.3 四模块高奖励 | 2000 | **4模块全部健康存活2000轮**，gamma延续v0.1/v0.2命名 |
 
 完整实验报告见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)。
 
@@ -245,4 +250,4 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 
 ---
 
-*Last updated: 2026-07-02 (v0.2: beta module + 2 bug fixes)*
+*Last updated: 2026-07-02 (v0.3: delta composite module + gamma stays counter-consensus)*

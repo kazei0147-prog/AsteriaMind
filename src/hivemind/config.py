@@ -51,7 +51,10 @@ class HiveMindConfig:
     aggressive_bias: float = 1.3               # 激进型偏向系数（>1 表示倾向高估）
     conservative_bias: float = 0.7             # 保守型偏向系数（<1 表示倾向低估）— v0.2 新增
     conservative_anchor_strength: float = 0.6  # 保守型锚定共识力度（0-1，越高越信任共识）— v0.2 新增
-    counter_bias_strength: float = 0.8         # 反共识型反向力度
+    counter_bias_strength: float = 0.8         # 反共识型反向力度（δ）
+
+    # ── 复合型模块 (γ) — v0.3 新增 ──
+    composite_strategy_weights: tuple = (0.3, 0.3, 0.4)  # (aggressive, conservative, neutral) 策略权重
 
     # ── 日志 ──
     log_level: str = "INFO"                    # 日志级别

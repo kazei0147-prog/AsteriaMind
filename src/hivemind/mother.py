@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from .config import HiveMindConfig
 from .energy import EnergyWallet
-from .submodule import SubModule, AggressiveModule, ConservativeModule, CounterConsensusModule, Proposal
+from .submodule import SubModule, AggressiveModule, ConservativeModule, CompositeModule, CounterConsensusModule, Proposal
 from .consensus import ConsensusTracker, ConsensusState
 from .fallback import FallbackController
 from .dream import DreamMechanism
@@ -55,8 +55,9 @@ class MotherModule:
         # ── 子模块 ──
         self.modules: List[SubModule] = [
             AggressiveModule(config),       # alpha (aggressive)
-            ConservativeModule(config),     # beta (conservative) — v0.2 新增
-            CounterConsensusModule(config), # gamma (counter_consensus)
+            ConservativeModule(config),     # beta (conservative)
+            CounterConsensusModule(config), # delta (counter_consensus) — 纠错者
+            CompositeModule(config),        # gamma (diplomat) — 外交官
         ]
 
         # ── 共识追踪器 ──
@@ -105,7 +106,8 @@ class MotherModule:
         错峰采集：不同模块在不同时间窗口采集数据。
         alpha：使用最新观测（激进追逐新信号）
         beta：使用稍延迟观测 + 共识锚定参考（保守审慎）
-        gamma：使用稍早观测（反共识需要"距离感"）
+        gamma：使用稍早观测 + 共识锚定参考（外交官需要多角度信息）— 外交官角色
+        delta：使用加权混合观测（纠错者融合多信号）
         """
         latest_obs = self._generate_observation()
 
@@ -118,7 +120,7 @@ class MotherModule:
         else:
             beta_obs = latest_obs * self.config.conservative_bias  # 第一轮直接低估
 
-        # gamma：稍早观测（延迟更大，需要"距离感"做反向推演）
+        # gamma (外交官)：稍早观测（需要多角度信息做混合策略）
         if len(self.data_buffer) > 2:
             gamma_obs = random.choice(self.data_buffer[-3:])
         elif len(self.data_buffer) > 0:
@@ -126,12 +128,19 @@ class MotherModule:
         else:
             gamma_obs = latest_obs
 
+        # delta (纠错者)：加权混合最新+延迟观测（反共识需要距离感）
+        if len(self.data_buffer) > 1:
+            delta_obs = 0.6 * latest_obs + 0.4 * self.data_buffer[-1]  # 60%最新 + 40%上一轮
+        else:
+            delta_obs = latest_obs
+
         self.data_buffer.append(latest_obs)
 
         return {
             "alpha_aggressive": alpha_obs,
             "beta_conservative": beta_obs,
-            "gamma_counter": gamma_obs,
+            "gamma_diplomat": gamma_obs,
+            "delta_counter": delta_obs,
         }
 
     def run_round(self) -> dict:

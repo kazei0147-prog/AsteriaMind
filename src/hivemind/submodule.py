@@ -1,10 +1,11 @@
 """
 子模块 - HiveMind 认知节点种群
 
-v0.2: 三模块架构
-  alpha (aggressive)   — 偏好新信号，倾向高估
-  beta  (conservative)  — 锚定共识，倾向低估（新增）
-  gamma (counter_consensus) — 逆主流而行，纠正偏移
+v0.3: 四模块架构
+  alpha (aggressive)    — 偏好新信号，倾向高估
+  beta  (conservative)  — 锚定共识，倾向低估
+  gamma (diplomat)         — 外交官，随机混合策略，桥梁角色
+  delta (counter_consensus) — 纠错者，逆主流而行，纠正偏移
 
 每个模块自带能量钱包、认知偏见、推演能力。
 """
@@ -254,7 +255,7 @@ class ConservativeModule(SubModule):
 
 class CounterConsensusModule(SubModule):
     """
-    反共识型 (gamma)
+    纠错者 (delta) — 反共识
     主动关注异常值与少数派观点，倾向于逆主流而行。
     特征：纠正偏移、发现异常、但容易被忽视。
     """
@@ -265,7 +266,7 @@ class CounterConsensusModule(SubModule):
             loan_max=config.innovation_loan_max,
         )
         super().__init__(
-            module_id="gamma_counter",
+            module_id="delta_counter",
             bias_type="counter_consensus",
             wallet=wallet,
             config=config,
@@ -306,6 +307,97 @@ class CounterConsensusModule(SubModule):
             value=biased_estimate,
             confidence=confidence,
             reasoning=f"反共识偏离, consensus={current_consensus:.2f}, counter_shift={counter_direction:.2f}",
+            energy_cost=cost,
+            round_number=round_num,
+        )
+        self.last_proposal = proposal
+        self.history.append(biased_estimate)
+        return proposal
+
+
+class CompositeModule(SubModule):
+    """
+    外交官 (gamma) — 随机混合策略
+
+    外交官角色：每轮随机选择一种策略（激进/保守/中性），
+    概率由 composite_strategy_weights 控制。
+    不站队任何一方，而是在 alpha（开拓者）和 beta（守门人）之间随机切换，
+    为系统提供"混合视角"与桥梁沟通，防止任何单一偏见主导。
+    """
+
+    def __init__(self, config: HiveMindConfig):
+        wallet = EnergyWallet(
+            balance=config.initial_module_energy,
+            loan_max=config.innovation_loan_max,
+        )
+        super().__init__(
+            module_id="gamma_diplomat",
+            bias_type="diplomat",
+            wallet=wallet,
+            config=config,
+        )
+        # 策略权重：激进 / 保守 / 中性
+        self.strategy_weights = config.composite_strategy_weights  # (aggressive_w, conservative_w, neutral_w)
+        self.strategy_names = ["aggressive", "conservative", "neutral"]
+
+    def observe(self, raw_data: float) -> float:
+        """复合型：基础值不变，偏见在 propose 中按策略施加"""
+        return raw_data
+
+    def propose(self, observation: float, current_consensus: float, round_num: int) -> Optional[Proposal]:
+        """
+        复合型提议：每轮随机选择一种策略。
+
+        - aggressive 策略：高估观测值（像 alpha）
+        - conservative 策略：低估 + 锚定共识（像 beta）
+        - neutral 策略：纯观测值 + 小噪声（独立视角）
+        """
+        if not self.alive:
+            return None
+
+        cost = self.config.inference_cost
+        if not self.wallet.can_afford(cost):
+            return None
+
+        self.wallet.spend(cost, reason=f"推演 round={round_num}", floor=self.config.energy_floor)
+        self.total_rounds += 1
+
+        # 按权重随机选择本轮策略
+        strategy = random.choices(
+            self.strategy_names,
+            weights=self.strategy_weights,
+            k=1,
+        )[0]
+
+        if strategy == "aggressive":
+            # 激进策略：高估，像 alpha
+            biased_estimate = observation * self.config.aggressive_bias
+            noise = random.gauss(0, self.config.observation_noise * 0.25)
+            biased_estimate += noise
+            reasoning_tag = "激进混合"
+
+        elif strategy == "conservative":
+            # 保守策略：低估 + 锚定，像 beta
+            my_low = observation * self.config.conservative_bias
+            anchor = self.config.conservative_anchor_strength
+            biased_estimate = anchor * current_consensus + (1 - anchor) * my_low
+            reasoning_tag = "保守混合"
+
+        else:
+            # 中性策略：纯观测 + 小噪声，独立视角
+            biased_estimate = observation
+            noise = random.gauss(0, self.config.observation_noise * 0.15)
+            biased_estimate += noise
+            reasoning_tag = "中性独立"
+
+        confidence = self._compute_confidence()
+
+        proposal = Proposal(
+            module_id=self.module_id,
+            value=biased_estimate,
+            confidence=confidence,
+            reasoning=f"{reasoning_tag}, strategy={strategy}, "
+                      f"obs={observation:.2f}, consensus={current_consensus:.2f}",
             energy_cost=cost,
             round_number=round_num,
         )
