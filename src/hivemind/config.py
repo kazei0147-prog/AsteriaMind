@@ -37,6 +37,15 @@ class HiveMindConfig:
     dream_rounds: int = 3                      # 每次梦境持续轮数
     counterfactual_mix_prob: float = 0.5       # 反事实杂交概率
 
+    # ── 知识蒸馏 (v0.4 新增) ──
+    distill_enabled: bool = True               # 是否启用知识蒸馏引擎
+    distill_min_samples: int = 50              # 最少样本数才触发蒸馏
+    distill_learning_rate: float = 0.05        # 蒸馏模型学习率
+    distill_epochs: int = 200                  # 每次蒸馏训练轮数
+    distill_label_threshold: float = 0.15      # 标签生成阈值（提案误差 / 目标值的比例）
+    distill_export_interval: int = 500         # 每隔 N 轮导出一次 checkpoint
+    distill_model_version: str = "0.4"         # 模型版本号
+
     # ── 临终协议 ──
     death_energy_threshold: float = 0.0        # 能量低于此值触发临终
     capsule_max_size: int = 1024               # 临终胶囊最大字节数（1KB）

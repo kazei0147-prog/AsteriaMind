@@ -74,6 +74,12 @@ def run_mvp(config: HiveMindConfig, output_dir: str = "./output") -> dict:
     with open(output_path / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
+    # v0.4：导出蒸馏检查点
+    if config.distill_enabled:
+        distill_path = output_path / "distilled_model.json"
+        mother.export_distillation_checkpoint(str(distill_path))
+        logger.info(f"蒸馏检查点已导出: {distill_path}")
+
     logger.info("=" * 60)
     logger.info("仿真完成 - 关键指标:")
     logger.info(f"  最终共识值: {summary['final_consensus']:.4f}")

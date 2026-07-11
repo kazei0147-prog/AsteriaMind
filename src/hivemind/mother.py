@@ -3,10 +3,14 @@
 
 母模块整合：调度器、能量会计、保底控制器。
 主循环：收集提议 → 评估 → 分发能量 → 保底检查 → 梦境触发 → 临终处理。
+
+v0.4 新增：每轮记录提案到 DistillationEngine，模拟结束后导出 checkpoint。
 """
 
 import random
+import json
 import logging
+from pathlib import Path
 from typing import List, Optional
 
 from .config import HiveMindConfig
@@ -147,6 +151,8 @@ class MotherModule:
         """
         执行一轮完整推演循环。
         返回本轮状态快照。
+
+        v0.4 新增：每轮将提案记录到蒸馏引擎。
         """
         self.round_num += 1
         round_log = {"round": self.round_num}
@@ -165,6 +171,10 @@ class MotherModule:
             proposal = m.propose(obs, current_consensus, self.round_num)
             if proposal is not None:
                 proposals.append(proposal)
+
+                # v0.4：将提案记录到蒸馏引擎，积累训练数据
+                if self.config.distill_enabled:
+                    self.dream.record_proposal(m, proposal.value)
 
         self.stats["total_proposals"] += len(proposals)
         round_log["proposals"] = [(p.module_id, p.value, p.confidence) for p in proposals]
@@ -246,6 +256,8 @@ class MotherModule:
     def run_simulation(self, max_rounds: Optional[int] = None) -> List[dict]:
         """
         运行完整仿真。
+
+        v0.4 新增：每隔 distill_export_interval 轮自动导出蒸馏 checkpoint。
         """
         rounds = max_rounds or self.config.max_rounds
         logger.info(f"开始仿真: {rounds}轮, 目标值={self.config.target_value}")
@@ -272,6 +284,26 @@ class MotherModule:
                     f"alive={alive_count}"
                 )
 
+            # v0.4：定期导出蒸馏 checkpoint
+            export_interval = self.config.distill_export_interval
+            if (
+                export_interval > 0
+                and self.config.distill_enabled
+                and self.dream.distiller is not None
+                and i > 0
+                and i % export_interval == 0
+                and self.dream.distiller.has_enough_data()
+            ):
+                # 执行蒸馏（如果还没蒸馏过）
+                self.dream.distiller.distill()
+                # 利用 export_checkpoint 生成数据但不写文件（仿真中途不写磁盘）
+                ckpt = self.dream.distiller.export_checkpoint()
+                logger.info(
+                    f"[轮次 {self.round_num}] 自动蒸馏 checkpoint: "
+                    f"samples={ckpt.get('n_training_samples')}, "
+                    f"loss={ckpt.get('final_loss', 'N/A')}"
+                )
+
         logger.info(f"仿真完成: {self.round_num}轮")
         return all_logs
 
@@ -280,7 +312,7 @@ class MotherModule:
         consensus = self.consensus.current
         final_error = abs(consensus.value - self.config.target_value)
 
-        return {
+        summary = {
             "simulation_rounds": self.round_num,
             "target_value": self.config.target_value,
             "final_consensus": consensus.value,
@@ -309,3 +341,41 @@ class MotherModule:
             "death_summary": self.death.summary(),
             "consensus_summary": self.consensus.summary(),
         }
+
+        # v0.4：追加蒸馏引擎摘要
+        if self.config.distill_enabled and self.dream.distiller is not None:
+            summary["distillation_summary"] = self.dream.distiller.summary()
+
+        return summary
+
+    # ── v0.4 知识蒸馏导出/导入 ──
+
+    def export_distillation_checkpoint(self, filepath: str):
+        """
+        导出蒸馏模型 checkpoint 到文件。
+
+        可在仿真结束后调用，将学到的知识持久化。
+        """
+        if not self.config.distill_enabled or self.dream.distiller is None:
+            logger.warning("蒸馏引擎未启用，无法导出 checkpoint")
+            return
+
+        # 先执行一次最终蒸馏（如果还有数据没蒸馏过）
+        if self.dream.distiller.has_enough_data():
+            self.dream.distiller.distill()
+
+        self.dream.distiller.save_checkpoint(filepath)
+        logger.info(f"蒸馏 checkpoint 已导出: {filepath}")
+
+    def load_distillation_checkpoint(self, filepath: str) -> bool:
+        """
+        从文件加载蒸馏模型 checkpoint。
+
+        在仿真开始前调用，跳过冷启动。
+        返回 True 表示加载成功。
+        """
+        if not self.config.distill_enabled or self.dream.distiller is None:
+            logger.warning("蒸馏引擎未启用，无法加载 checkpoint")
+            return False
+
+        return self.dream.distiller.load_checkpoint_file(filepath)

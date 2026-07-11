@@ -1,0 +1,206 @@
+{
+  "simulation_rounds": 2000,
+  "target_value": 50.0,
+  "final_consensus": 59.93733092404158,
+  "final_error": 9.937330924041582,
+  "final_confidence": 0.7940083342718772,
+  "alive_modules": 4,
+  "total_proposals": 8000,
+  "total_energy_earned": 50000.0,
+  "total_energy_spent": 43234.0,
+  "fallback_count": 0,
+  "dream_count": 399,
+  "death_count": 0,
+  "module_summaries": {
+    "alpha_aggressive": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 1788.4643126629826,
+        "total_earned": 12499.964312662982,
+        "total_spent": 10811.5,
+        "loan_balance": 0.0,
+        "loan_rounds_remaining": 0,
+        "struggling": false
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 65.15206984289827
+    },
+    "beta_conservative": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 1787.0118957790057,
+        "total_earned": 12500.011895779005,
+        "total_spent": 10813.0,
+        "loan_balance": 0.0,
+        "loan_rounds_remaining": 0,
+        "struggling": false
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 46.40491307692683
+    },
+    "delta_counter": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 1802.0118957790057,
+        "total_earned": 12500.011895779005,
+        "total_spent": 10798.0,
+        "loan_balance": 0.0,
+        "loan_rounds_remaining": 0,
+        "struggling": false
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 50.933530237318415
+    },
+    "gamma_diplomat": {
+      "alive": true,
+      "legacy_capsule": null,
+      "wallet": {
+        "balance": 1788.5118957790057,
+        "total_earned": 12500.011895779005,
+        "total_spent": 10811.5,
+        "loan_balance": 0.0,
+        "loan_rounds_remaining": 0,
+        "struggling": false
+      },
+      "adoption_count": 2000,
+      "total_rounds": 2000,
+      "avg_proposal": 53.30849158124729
+    }
+  },
+  "fallback_summary": {
+    "fallback_count": 0,
+    "shadow_state": "idle",
+    "last_fallback": null
+  },
+  "dream_summary": {
+    "dream_count": 399,
+    "distilled_rules_count": 1596,
+    "last_dream": {
+      "round": 2000,
+      "dream_id": 399,
+      "distilled_rules": [
+        "[alpha_aggressive] avg=65.15, trend=12.19, volatility=89.33",
+        "[beta_conservative] avg=46.40, trend=30.77, volatility=40.17",
+        "[delta_counter] avg=50.93, trend=16.00, volatility=47.64",
+        "[gamma_diplomat] avg=53.31, trend=4.61, volatility=85.77"
+      ],
+      "hybrids": [
+        {
+          "module1": "delta_counter",
+          "module2": "alpha_aggressive",
+          "weight": 0.4843598432298729,
+          "hybrid_value": 67.38728754863088,
+          "gain": -7.449956624589298,
+          "distill_boost": 0.0,
+          "useful": false
+        }
+      ],
+      "knowledge_distilled": false,
+      "distill_summary": null
+    },
+    "distillation_engine": {
+      "n_training_samples": 8000,
+      "distill_count": 82,
+      "export_count": 3,
+      "model_name": "hivemind-v0.4",
+      "model_epochs": 16400,
+      "model_loss": 4.349954772204162e-05,
+      "feature_importance": [
+        [
+          "energy_health",
+          1.3433852243456113
+        ],
+        [
+          "adoption_rate",
+          0.9707411108199937
+        ],
+        [
+          "avg_recent",
+          0.6088906217471295
+        ],
+        [
+          "bias_magnitude",
+          0.1673067142392517
+        ],
+        [
+          "volatility",
+          0.16472609706713628
+        ],
+        [
+          "consensus_delta",
+          0.06107847896515473
+        ],
+        [
+          "bias_type",
+          0.029797530747503916
+        ],
+        [
+          "struggling",
+          0.0
+        ]
+      ]
+    }
+  },
+  "death_summary": {
+    "total_deaths": 0,
+    "archaeology_count": 0,
+    "discarded_count": 0,
+    "death_events": []
+  },
+  "consensus_summary": {
+    "current_value": 59.93733092404158,
+    "current_confidence": 0.7940083342718772,
+    "change_rate": 0.026532042178615833,
+    "shadow_active": false,
+    "shadow_value": null,
+    "history_length": 2000
+  },
+  "distillation_summary": {
+    "n_training_samples": 8000,
+    "distill_count": 82,
+    "export_count": 3,
+    "model_name": "hivemind-v0.4",
+    "model_epochs": 16400,
+    "model_loss": 4.349954772204162e-05,
+    "feature_importance": [
+      [
+        "energy_health",
+        1.3433852243456113
+      ],
+      [
+        "adoption_rate",
+        0.9707411108199937
+      ],
+      [
+        "avg_recent",
+        0.6088906217471295
+      ],
+      [
+        "bias_magnitude",
+        0.1673067142392517
+      ],
+      [
+        "volatility",
+        0.16472609706713628
+      ],
+      [
+        "consensus_delta",
+        0.06107847896515473
+      ],
+      [
+        "bias_type",
+        0.029797530747503916
+      ],
+      [
+        "struggling",
+        0.0
+      ]
+    ]
+  }
+}

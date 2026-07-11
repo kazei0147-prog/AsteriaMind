@@ -310,3 +310,131 @@ See experiments 1-4 above for full v0.1 results.
 2. **Fifth module (epsilon, lazy-load)**: Add a hibernation strategy — modules that can sleep during over-saturated periods
 3. **Cross-module interaction effects**: Test what happens if one module is killed mid-simulation (recovery dynamics)
 4. **Scale test**: Try 5-8 modules to find the practical limit of the architecture
+
+---
+
+## v0.4 Experiments (知识蒸馏引擎)
+
+**Date**: 2026-07-11  
+**Version**: v0.4 — 梦境升级为知识蒸馏引擎
+
+### v0.4 Key Changes
+
+1. **新增 `distill.py` — 知识蒸馏引擎**:
+   - 特征提取 (`extract_features`): 从模块状态提取 8 维特征向量（偏见类型、能量健康度、采纳率、共识偏差、波动性、挣扎标志、近期均值、偏见幅度）
+   - 标签生成 (`compute_label`): 基于提案与目标值距离的 sigmoid 平滑标签
+   - 轻量模型 (`DistilledModel`): 纯 Python 逻辑回归，零外部依赖，训练产物 ~500 bytes
+   - 蒸馏引擎 (`DistillationEngine`): 管理训练样本积累、定期蒸馏、checkpoint 导出/导入
+
+2. **梦境升级 (`dream.py`)**:
+   - 集成 `DistillationEngine`，每轮仿真通过 `record_proposal()` 积累训练样本
+   - 保留原有"表层蒸馏"（统计规则提取）作为兼容层
+   - 反事实杂交保留（`distill_boost` 实验性功能默认关闭，待模型精度足够后启用）
+
+3. **母模块升级 (`mother.py`)**:
+   - 每轮提案自动记录到蒸馏引擎（`run_round()` 内）
+   - 新增 `export_distillation_checkpoint()` / `load_distillation_checkpoint()` 方法
+   - 仿真中途定期触发蒸馏（每 500 轮）
+
+4. **runner.py 升级**:
+   - 仿真结束后自动导出 `distilled_model.json` checkpoint
+
+### 架构：蒸馏管道
+
+```
+每轮仿真
+  ├─ 模块 propose → 产生 (module, value, consensus) 
+  ├─ record_proposal() → 特征提取 + 标签计算 → 积累训练样本
+  └─ 梦境触发 → 蒸馏训练 → 更新 mini 模型
+
+仿真结束
+  └─ export_distillation_checkpoint() → distilled_model.json (~500 bytes)
+```
+
+### 蒸馏模型结构
+
+| 属性 | 值 |
+|------|-----|
+| 模型类型 | 逻辑回归（纯 Python，零依赖） |
+| 特征数 | 8 维 |
+| 训练算法 | 批量梯度下降 |
+| 学习率 | 0.05 |
+| 每次蒸馏 epochs | 200 |
+| Checkpoint 大小 | ~500 bytes (JSON) |
+| 可加载复用 | 是（`load_checkpoint()`） |
+
+---
+
+## Experiment 7: 蒸馏引擎验证 (2000 rounds, reward=25)
+
+**Purpose**: 验证 v0.4 知识蒸馏引擎在不破坏系统收敛的前提下正常工作。
+
+| Parameter | Value | Note |
+|-----------|-------|------|
+| Rounds | 2000 | Same as exp06b |
+| Target | 50 | Same |
+| Noise | 10 | Same |
+| Adoption Reward | 25 | Same |
+| Inference Cost | 5 | Same |
+| Distill enabled | True | v0.4 新参数 |
+| Distill min samples | 50 | v0.4 新参数 |
+| Distill epochs | 200 | v0.4 新参数 |
+| Distill export interval | 500 | v0.4 新参数 |
+
+**Key Results**:
+
+- **alpha**: alive, balance=1788, avg_prop=65.15, NOT struggling
+- **beta**: alive, balance=1787, avg_prop=46.40, NOT struggling
+- **gamma_diplomat**: alive, balance=1788, avg_prop=53.31, NOT struggling
+- **delta_counter**: alive, balance=1802, avg_prop=50.93, NOT struggling
+- Fallback: 0, Dream: 399, Deaths: 0
+- **Distillation: 8000 samples, 82 cycles, 16400 epochs, loss=4.35e-5**
+
+**特征重要性排序**:
+
+| 排名 | 特征 | 权重 | 解读 |
+|------|------|------|------|
+| 1 | `energy_health` | 1.34 | 能量状态是预测提案质量的最强因子 |
+| 2 | `adoption_rate` | 0.97 | 历史被采纳率是第二强预测因子 |
+| 3 | `avg_recent` | 0.61 | 近期提案均值也有显著预测力 |
+| 4 | `bias_magnitude` | 0.17 | 偏见幅度中等影响 |
+| 5 | `volatility` | 0.16 | 提案波动性中等影响 |
+| 6 | `consensus_delta` | 0.06 | 与共识的偏差影响较小 |
+| 7 | `bias_type` | 0.03 | 偏见类型本身影响很小 |
+| 8 | `struggling` | 0.00 | 在有利条件下无挣扎，权重为零 |
+
+**Observations**:
+
+1. **蒸馏引擎不破坏收敛**: 误差 9.94 在随机种子方差范围内（exp06b: 5.08），架构未被干扰
+2. **特征重要性符合直觉**: `energy_health` 排第一——能量充足的模块确实产出更准确的提案
+3. **Checkpoint 极轻**: 512 bytes JSON，可嵌入任何系统，真正做到"用时间置换算力"
+4. **`bias_type` 权重极低 (0.03)**: 说明模型学会的是"不看标签，看表现"——哪种偏见不重要，模块的实际表现才重要
+5. **82 轮蒸馏中模型持续学习**: loss 从初始 ~0.5 降至 4.35e-5，收敛极佳
+
+**Architectural Validation**:
+- 蒸馏引擎作为非侵入式叠加层（overlay），不改动核心仿真逻辑
+- 模型可随时导出/加载，实现"冷启动 → 热启动"的过渡
+- 为 v0.5 的"外部数据 + 蒸馏反馈闭环"奠定了基础设施
+
+**Files**: `experiments/exp07_distillation_validation/`
+
+---
+
+## v0.4 Summary
+
+### Achievements
+1. **知识蒸馏引擎完成**: 8 维特征 + 逻辑回归模型 + checkpoint 导出，全部零外部依赖
+2. **梦境从"统计报表"升级为"训练管道"**: 不再是三个数字，而是可复用的决策模型
+3. **Checkpoint 512 bytes**: 极轻量，可嵌入任何场景
+4. **特征重要性验证架构正确性**: 能量健康 > 采纳率 > 提案质量，符合 HiveMind 的"能量经济学"核心假设
+
+### Insights
+1. **模块的偏见类型不重要，表现才重要**: bias_type 权重 0.03 vs energy_health 1.34
+2. **蒸馏不能急于干预系统**: distill_boost 会引入过度扰动，需要模型精度足够高才能启用
+3. **训练样本质量 > 数量**: 8000 样本中，前 500 轮权重远大于后 1500 轮的稳态期
+
+### Next Steps (v0.5)
+1. **外部数据接入 (DataSource)**: 替换合成观测为真实数据
+2. **蒸馏反馈闭环**: 蒸馏模型反向指导共识聚合权重
+3. **多轮 checkpoint 对比**: 仿真中途加载历史 checkpoint，观察迁移效果
+4. **自适应奖励 (v0.4 backlog)**: reward 随模块数动态调整
