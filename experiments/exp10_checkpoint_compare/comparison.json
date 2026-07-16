@@ -1,0 +1,15 @@
+{
+  "cold": {
+    "consensus": 84.36685473936926,
+    "alive": 4,
+    "loss": 0.0004027015704283803
+  },
+  "warm": {
+    "consensus": 92.51847508688118,
+    "alive": 4,
+    "loss": 0.00019063009401328138,
+    "checkpoint_loaded": true
+  },
+  "delta_consensus": 8.151620347511923,
+  "delta_alive": 0
+}
