@@ -1,0 +1,12 @@
+{
+  "test": "sensor_fault_co2",
+  "hm_error_normal": 31.691912294826647,
+  "hm_error_fault": 17.965464264177918,
+  "ma_error_normal": 1.4241482758620718,
+  "ma_error_fault": 1.4445899999999978,
+  "hm_degradation": -13.72644803064873,
+  "ma_degradation": 0.020441724137926,
+  "hm_wins": false,
+  "final_truth": 429.06,
+  "final_consensus": 416.6917259573089
+}
