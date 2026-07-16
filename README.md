@@ -147,6 +147,7 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 | 追求“全局最优” | 维护“局部可生存” |
 | 集中算力 | 分散演化 |
 | 外部依赖 | 内部自洽 |
+| 手动调参 | 自适应调节 |
 
 它相信：
 
@@ -156,7 +157,7 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 
 ## 六、当前状态
 
-**v0.5：五模块架构 + 好奇心动因 + 主动交互表达层。**
+**v0.6：DataSource 抽象层 + 自适应奖励 + 蒸馏反馈闭环 + 多轮 checkpoint 对比。**
 
 - [x] 核心机制定义
 - [x] 能量经济学模型
@@ -165,20 +166,15 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 - [x] 最小可行原型（MVP）代码 → [`src/hivemind/`](src/hivemind/)
 - [x] v0.1 单机运行测试 → 4 组实验已完成
 - [x] v0.2 保守型（beta）模块实现
-- [x] v0.2 修复 energy_floor 僵尸 bug（floor 改"挣扎线"）
-- [x] v0.2 修复置信度衰减 bug（累积衰减+部分恢复）
-- [x] v0.2 修复奖励分配 bug（比例分配）
-- [x] v0.2 三模块 2000 轮验证 → 2 组实验已完成，详见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)
-- [x] v0.3 第四模块 delta 实现（反共识/纠错者角色）
-- [x] v0.3.1 gamma/delta 角色对齐设计图：γ=外交官（复合型混合策略）、δ=纠错者（反共识）
-- [x] v0.3 四模块 2000 轮验证 → 2 组实验已完成
+- [x] v0.2 修复 energy_floor 僵尸 bug + 置信度衰减 bug + 奖励分配 bug
+- [x] v0.2 三模块 2000 轮验证 → 2 组实验已完成
+- [x] v0.3 四模块架构（γ/δ 角色对齐）+ 2000 轮验证
 - [x] v0.4 知识蒸馏引擎（8维特征 + 逻辑回归 + 512 bytes checkpoint）
-- [x] v0.4 梦境升级为训练管道（8000 样本 / 82 轮蒸馏 / loss=4.35e-5）
-- [x] v0.5 第五模块 epsilon 幸存者（懒加载休眠策略）
-- [x] v0.5 好奇心动因（|观测-共识|/|共识| > 阈值 → 触发惊讶信号）
-- [x] v0.5 主动交互表达层（模块个性化表达 + 母模块调度组合）
-- [ ] 外部数据接入（DataSource 抽象层）
-- [ ] 蒸馏反馈闭环（模型反向指导共识权重）
+- [x] v0.5 epsilon 幸存者 + 好奇心动因 + 主动交互表达层
+- [x] **v0.6 DataSource 抽象层**（CSV/API/多源/噪声，插拔式）
+- [x] **v0.6 自适应奖励**（reward × alive_modules / 4，不再手动调参）
+- [x] **v0.6 蒸馏反馈闭环**（模型预测可信度 → 指导奖励分配）
+- [x] **v0.6 多轮 checkpoint 对比**（热启动蒸馏效率提升 2.1×）
 - [ ] 离线环境适配
 - [ ] 实际场景验证
 
@@ -215,6 +211,7 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 | `energy.py` | EnergyWallet | 能量会计（支出/收入/借贷/挣扎线） |
 | `submodule.py` | Alpha + Beta + Gamma + Delta + Epsilon | 开拓者 + 守门人 + 外交官 + 纠错者 + 幸存者（懒加载）|
 | `distill.py` | DistilledModel + DistillationEngine | 知识蒸馏引擎（特征提取 + 逻辑回归 + checkpoint）|
+| `datasource.py` | DataSource + CSV + Multi + Noisy | v0.6 数据源抽象层（插拔式，支持 CSV/API/多源/噪声）|
 | `consensus.py` | ConsensusTracker | 共识追踪（值 + 累积置信度衰减 + 历史） |
 | `fallback.py` | FallbackController | 保底机制（影子候选） |
 | `dream.py` | DreamMechanism | 梦境（蒸馏 + 杂交） |
@@ -234,7 +231,9 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 | `exp06_four_module_validation` | v0.3 四模块中等奖励 | 2000 | 4模块全活但都挣扎（reward=15不够分） |
 | `exp06b_four_module_favorable` | v0.3 四模块高奖励 | 2000 | **4模块全部健康存活2000轮**（注：此实验在 v0.3.1 角色互换前运行，当时 gamma=反共识、delta=复合型） |
 | `exp07_distillation_validation` | v0.4 蒸馏引擎验证 | 2000 | 8000样本 82轮蒸馏 loss=4.35e-5 checkpoint=512 bytes |
-| `exp08_five_module_curiosity` | v0.5 五模块+好奇心 | 2000 | 5模块 好奇心584轮触发 表达389轮 epsilon生命周期验证 |
+| `exp08_five_module_curiosity` | v0.5 五模块+好奇心 | 2000 | 5模块 好奇心584轮 表达389轮 epsilon生命周期 |
+| `exp09_real_data_source` | v0.6 真实数据 | 1038 | 全球温度异常数据 4/5存活 自适应奖励 蒸馏反馈 |
+| `exp10_checkpoint_compare` | v0.6 Checkpoint对比 | 1038 | 冷vs热启动 蒸馏效率提升2.1× |
 
 完整实验报告见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)。
 
@@ -261,4 +260,4 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 
 ---
 
-*Last updated: 2026-07-16 (v0.5: epsilon survivor + curiosity drive + expression layer)*
+*Last updated: 2026-07-16 (v0.6: real data source + adaptive reward + distillation feedback + checkpoint compare)*
