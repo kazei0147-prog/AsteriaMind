@@ -1,0 +1,30 @@
+{
+  "name": "hivemind-v0.4",
+  "version": "v0.4",
+  "n_features": 8,
+  "feature_names": [
+    "bias_type",
+    "energy_health",
+    "adoption_rate",
+    "consensus_delta",
+    "volatility",
+    "struggling",
+    "avg_recent",
+    "bias_magnitude"
+  ],
+  "weights": [
+    0.027757037980108715,
+    -1.3412304552587409,
+    -0.9968892166967007,
+    -0.05683530053828511,
+    -0.2014651534094758,
+    0.0,
+    -0.6087612832886221,
+    -0.14054894425446232
+  ],
+  "bias": -1.18277840606904,
+  "trained_epochs": 16800,
+  "final_loss": 4.882140306819281e-05,
+  "distill_count": 84,
+  "n_training_samples": 8090
+}

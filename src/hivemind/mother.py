@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from .config import HiveMindConfig
 from .energy import EnergyWallet
-from .submodule import SubModule, AggressiveModule, ConservativeModule, CompositeModule, CounterConsensusModule, Proposal
+from .submodule import SubModule, AggressiveModule, ConservativeModule, CompositeModule, CounterConsensusModule, SurvivorModule, Proposal
 from .consensus import ConsensusTracker, ConsensusState
 from .fallback import FallbackController
 from .dream import DreamMechanism
@@ -62,6 +62,7 @@ class MotherModule:
             ConservativeModule(config),     # beta (conservative)
             CounterConsensusModule(config), # delta (counter_consensus) — 纠错者
             CompositeModule(config),        # gamma (diplomat) — 外交官
+            SurvivorModule(config),         # epsilon (survivor) — 幸存者 v0.5
         ]
 
         # ── 共识追踪器 ──
@@ -84,6 +85,7 @@ class MotherModule:
 
         # ── 运行日志 ──
         self.log: List[dict] = []
+        self._last_expression_round: int = -100  # v0.5: 表达冷却计数器
 
         # ── 统计 ──
         self.stats = {
@@ -145,6 +147,7 @@ class MotherModule:
             "beta_conservative": beta_obs,
             "gamma_diplomat": gamma_obs,
             "delta_counter": delta_obs,
+            "epsilon_survivor": latest_obs,  # v0.5: 幸存者用最新观测
         }
 
     def run_round(self) -> dict:
@@ -153,12 +156,31 @@ class MotherModule:
         返回本轮状态快照。
 
         v0.4 新增：每轮将提案记录到蒸馏引擎。
+        v0.5 新增：好奇心检测 + Epsilon 唤醒 + 主动交互表达式。
         """
         self.round_num += 1
         round_log = {"round": self.round_num}
 
         # ── 1. 错峰采集 ──
         observations = self._stagger_collection()
+
+        # ── v0.5: 好奇心检测 + Epsilon 唤醒 ──
+        curiosity_signal = self._check_curiosity()
+        round_log["curiosity_signal"] = curiosity_signal
+        if curiosity_signal > 0:
+            # 尝试唤醒 epsilon
+            epsilon = self._get_module("epsilon_survivor")
+            if epsilon is not None and hasattr(epsilon, "try_wake"):
+                epsilon.try_wake(curiosity_signal)
+            # 为 epsilon 生成观测（即使它可能还在睡）
+            if len(self.data_buffer) > 0:
+                observations["epsilon_survivor"] = self.data_buffer[-1]
+
+        # ── v0.5: 主动交互表达式 ──
+        if self.config.expression_enabled:
+            expressions = self._schedule_expressions(observations, curiosity_signal)
+            if expressions:
+                round_log["expressions"] = expressions
 
         # ── 2. 收集提议 ──
         proposals: List[Proposal] = []
@@ -307,6 +329,106 @@ class MotherModule:
         logger.info(f"仿真完成: {self.round_num}轮")
         return all_logs
 
+    # ── v0.5 好奇心与主动交互 ──
+
+    def _get_module(self, module_id: str) -> Optional[SubModule]:
+        """查找指定 ID 的模块"""
+        for m in self.modules:
+            if m.module_id == module_id:
+                return m
+        return None
+
+    def _check_curiosity(self) -> float:
+        """
+        v0.5: 好奇心检测。
+
+        计算 |最新观测 - 当前共识| / |共识| 作为"惊讶度"。
+        超过 curiosity_threshold 时返回信号值 [0, 1]。
+        """
+        if not self.data_buffer or self.consensus.current.value == 0:
+            return 0.0
+
+        latest_obs = self.data_buffer[-1]
+        consensus_val = self.consensus.current.value
+        deviation = abs(latest_obs - consensus_val)
+        normalized = deviation / max(abs(consensus_val), 0.01)
+        threshold = self.config.curiosity_threshold
+
+        if normalized > threshold:
+            signal = min(normalized / (threshold * 2), 1.0)
+            if self.round_num % 50 == 0:
+                logger.debug(f"[好奇心] 信号={signal:.3f} obs={latest_obs:.2f} consensus={consensus_val:.2f}")
+            return signal
+        return 0.0
+
+    def _schedule_expressions(self, observations: dict, curiosity_signal: float) -> Optional[list]:
+        """
+        v0.5: 主动交互调度层。
+
+        按三条规则决定是否让模块说话：
+        A. 低置信 → 让最自信的模块发问
+        B. 能量盈余 → 让盈余最多的模块声明探索
+        C. 好奇心触发 → 让偏离最大的模块发言
+
+        如果多条规则同时触发，组合多个表达（不分先后）。
+        返回 [{"module": id, "expression": str, "trigger": str}, ...] 或 None。
+        """
+        expressions = []
+        consensus_val = self.consensus.current.value
+        confidence = self.consensus.current.confidence
+        total_energy = sum(m.wallet.balance for m in self.modules if m.alive)
+        budget = self.config.total_energy_budget
+
+        alive_modules = [m for m in self.modules if m.alive]
+        if not alive_modules:
+            return None
+
+        # 表达冷却：至少间隔 5 轮（避免能量盈余时每轮都说）
+        if self.round_num - self._last_expression_round < 5:
+            return None
+
+        # 取最新观测（用 alpha 的观测作为代表）
+        latest_obs = observations.get("alpha_aggressive", self.data_buffer[-1] if self.data_buffer else 50.0)
+
+        # 规则 A: 低置信 → 询问
+        if confidence < self.config.interaction_confidence_threshold:
+            best = max(alive_modules, key=lambda m: (
+                m.last_proposal.confidence if m.last_proposal else 0
+            ))
+            expr = best.express(latest_obs, consensus_val)
+            expressions.append({
+                "module": best.module_id,
+                "expression": expr,
+                "trigger": "low_confidence",
+            })
+
+        # 规则 B: 能量盈余 → 探索
+        if total_energy > budget * self.config.interaction_energy_surplus_ratio:
+            richest = max(alive_modules, key=lambda m: m.wallet.balance)
+            expr = richest.express(latest_obs, consensus_val)
+            expressions.append({
+                "module": richest.module_id,
+                "expression": expr + " 🚀 [探索模式]",
+                "trigger": "energy_surplus",
+            })
+
+        # 规则 C: 好奇心 → 惊讶声明
+        if curiosity_signal > 0 and self.round_num > 3:
+            if alive_modules:
+                most_deviant = max(alive_modules, key=lambda m: (
+                    abs(m.history[-1] - consensus_val) if m.history else 0
+                ))
+                expr = most_deviant.express(latest_obs, consensus_val)
+                expressions.append({
+                    "module": most_deviant.module_id,
+                    "expression": expr + " 🔍 [好奇心触发]",
+                    "trigger": "curiosity",
+                })
+
+        if expressions:
+            self._last_expression_round = self.round_num
+        return expressions if expressions else None
+        """返回仿真最终摘要"""
     def final_summary(self) -> dict:
         """返回仿真最终摘要"""
         consensus = self.consensus.current

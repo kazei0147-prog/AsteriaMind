@@ -65,6 +65,16 @@ class HiveMindConfig:
     # ── 复合型模块 (γ) — v0.3 新增 ──
     composite_strategy_weights: tuple = (0.3, 0.3, 0.4)  # (aggressive, conservative, neutral) 策略权重
 
+    # ── 懒加载模块 (ε) — v0.5 新增 ──
+    epsilon_sleep_cost_ratio: float = 0.1      # 休眠能耗比例（正常推演的 10%）
+    epsilon_wake_threshold: float = 0.3        # 唤醒阈值（好奇心信号超过此值唤醒）
+
+    # ── 好奇心与主动交互 — v0.5 新增 ──
+    curiosity_threshold: float = 0.25          # 好奇心触发阈值（|obs-consensus| / |consensus|）
+    interaction_confidence_threshold: float = 0.4  # 低置信触发询问的阈值
+    interaction_energy_surplus_ratio: float = 1.5  # 能量盈余触发探索的倍数
+    expression_enabled: bool = True            # 是否启用模块表达层
+
     # ── 日志 ──
     log_level: str = "INFO"                    # 日志级别
     log_file: str = ""                         # 日志文件路径（空则stdout）

@@ -1,13 +1,14 @@
 """
 子模块 - HiveMind 认知节点种群
 
-v0.3: 四模块架构
+v0.5: 五模块架构 + 表达层
   alpha (aggressive)    — 偏好新信号，倾向高估
   beta  (conservative)  — 锚定共识，倾向低估
-  gamma (diplomat)         — 外交官，随机混合策略，桥梁角色
+  gamma (diplomat)      — 外交官，随机混合策略，桥梁角色
   delta (counter_consensus) — 纠错者，逆主流而行，纠正偏移
+  epsilon (survivor)    — 幸存者，懒加载休眠策略，低功耗待机
 
-每个模块自带能量钱包、认知偏见、推演能力。
+每个模块自带能量钱包、认知偏见、推演能力、表达能力。
 """
 
 from dataclasses import dataclass
@@ -149,6 +150,48 @@ class SubModule:
         self.generate_legacy_capsule()
         logger.info(f"[{self.module_id}] 已死亡, 胶囊已生成")
 
+    # ── v0.5 表达层 ──
+
+    def _expression_templates(self) -> List[str]:
+        """返回此偏见类型的表达模板。子类覆盖以提供个性化模板。"""
+        return [
+            "当前观测 {obs:.2f}，共识 {cs:.2f}，偏差 {dev:.2f}。我认为应当{action}。",
+            "数据指向 {obs:.2f}，而共识在 {cs:.2f}。{bias_note}",
+            "与共识差距 {dev:.2f}。{stance}",
+        ]
+
+    def _expression_context(self, observation: float, current_consensus: float) -> dict:
+        """构建表达所需的上下文变量。子类覆盖以提供个性化变量。"""
+        deviation = observation - current_consensus
+        return {
+            "obs": observation,
+            "cs": current_consensus,
+            "dev": deviation,
+            "abs_dev": abs(deviation),
+            "action": "观察",
+            "bias_note": "",
+            "stance": "",
+        }
+
+    def express(self, observation: float, current_consensus: float) -> str:
+        """
+        v0.5: 模块基于当前状态生成一句话自然表达。
+
+        每次调用会：
+        1. 用子类的偏见生成上下文变量（含具体数值）
+        2. 从模板池中轮换选择（避免重复）
+        3. 格式化输出
+        """
+        ctx = self._expression_context(observation, current_consensus)
+        templates = self._expression_templates()
+        # 轮换模板，避免重复
+        idx = getattr(self, "_expr_counter", 0) % len(templates)
+        self._expr_counter = idx + 1
+        try:
+            return templates[idx].format(**ctx)
+        except KeyError:
+            return templates[0].format(**ctx)
+
 
 class AggressiveModule(SubModule):
     """
@@ -175,6 +218,25 @@ class AggressiveModule(SubModule):
         # 激进型更愿意冒险，噪声扰动更大
         noise = random.gauss(0, self.config.observation_noise * 0.3)
         return biased + noise
+
+    # ── v0.5 表达层 ──
+    def _expression_context(self, observation, current_consensus):
+        deviation = observation - current_consensus
+        direction = "上调预估" if observation > current_consensus else "注意回落信号"
+        return {
+            "obs": observation, "cs": current_consensus,
+            "dev": deviation, "abs_dev": abs(deviation),
+            "action": f"追逐新信号: {direction}",
+            "bias_note": f"我的高估偏向检测到机会（×{self.config.aggressive_bias}）",
+            "stance": "建议大胆行动" if abs(deviation) > 3 else "值得关注",
+        }
+
+    def _expression_templates(self):
+        return [
+            "📡 观测 {obs:.1f} vs 共识 {cs:.1f}，偏差 {dev:+.1f}。{bias_note}",
+            "⚠️ 信号偏离 {abs_dev:.1f}。{action}。{stance}。",
+            "🔺 新数据指向 {obs:.1f}，共识滞后 {abs_dev:.1f}。建议跟上节奏。",
+        ]
 
 
 class ConservativeModule(SubModule):
@@ -252,6 +314,24 @@ class ConservativeModule(SubModule):
         self.history.append(biased_estimate)
         return proposal
 
+    # ── v0.5 表达层 ──
+    def _expression_context(self, observation, current_consensus):
+        deviation = observation - current_consensus
+        return {
+            "obs": observation, "cs": current_consensus,
+            "dev": deviation, "abs_dev": abs(deviation),
+            "action": "锚定当前共识" if abs(deviation) < 5 else "微调偏离",
+            "bias_note": f"保守锚定（偏向 {self.config.conservative_bias}x，锚力度 {self.config.conservative_anchor_strength}）",
+            "stance": "维持稳定" if abs(deviation) < 5 else "需警惕过度波动",
+        }
+
+    def _expression_templates(self):
+        return [
+            "🔒 观测 {obs:.1f} vs 共识 {cs:.1f}。{bias_note}",
+            "📉 偏差 {dev:+.1f}，但不急于调整。{action}。{stance}。",
+            "🛡️ 共识 {cs:.1f} 尚稳，新信号 {obs:.1f} 不足以动摇。继续锚定。",
+        ]
+
 
 class CounterConsensusModule(SubModule):
     """
@@ -314,6 +394,25 @@ class CounterConsensusModule(SubModule):
         self.history.append(biased_estimate)
         return proposal
 
+    # ── v0.5 表达层 ──
+    def _expression_context(self, observation, current_consensus):
+        deviation = observation - current_consensus
+        counter_dir = "共识可能偏高, 拉回" if deviation < 0 else "共识可能偏低, 上推"
+        return {
+            "obs": observation, "cs": current_consensus,
+            "dev": deviation, "abs_dev": abs(deviation),
+            "action": counter_dir,
+            "bias_note": f"反向力度 ×{self.config.counter_bias_strength}，偏移 {deviation:+.1f}",
+            "stance": "质疑主流" if abs(deviation) > 5 else "微调方向",
+        }
+
+    def _expression_templates(self):
+        return [
+            "🔍 共识 {cs:.1f} vs 观测 {obs:.1f}，偏移 {dev:+.1f}。{bias_note}",
+            "↩️ {action}。{stance}。",
+            "❗ 主流通往 {cs:.1f}，但我观测到 {obs:.1f}。差距 {abs_dev:.1f} 值得质疑。",
+        ]
+
 
 class CompositeModule(SubModule):
     """
@@ -339,6 +438,7 @@ class CompositeModule(SubModule):
         # 策略权重：激进 / 保守 / 中性
         self.strategy_weights = config.composite_strategy_weights  # (aggressive_w, conservative_w, neutral_w)
         self.strategy_names = ["aggressive", "conservative", "neutral"]
+        self.current_strategy = "neutral"  # v0.5: 供表达层使用
 
     def observe(self, raw_data: float) -> float:
         """复合型：基础值不变，偏见在 propose 中按策略施加"""
@@ -368,6 +468,7 @@ class CompositeModule(SubModule):
             weights=self.strategy_weights,
             k=1,
         )[0]
+        self.current_strategy = strategy  # v0.5: 供表达层使用
 
         if strategy == "aggressive":
             # 激进策略：高估，像 alpha
@@ -404,3 +505,176 @@ class CompositeModule(SubModule):
         self.last_proposal = proposal
         self.history.append(biased_estimate)
         return proposal
+
+    # ── v0.5 表达层 ──
+    def _expression_context(self, observation, current_consensus):
+        deviation = observation - current_consensus
+        strategy_labels = {
+            "aggressive": "激进视角", "conservative": "保守视角", "neutral": "中性视角"
+        }
+        label = strategy_labels.get(self.current_strategy, "混合视角")
+        return {
+            "obs": observation, "cs": current_consensus,
+            "dev": deviation, "abs_dev": abs(deviation),
+            "action": f"采用{label}",
+            "bias_note": f"本轮策略: {label}（权重 {self.strategy_weights}）",
+            "stance": "综合判断中" if abs(deviation) > 5 else "保持平衡",
+        }
+
+    def _expression_templates(self):
+        return [
+            "🤝 {bias_note}。观测 {obs:.1f} vs 共识 {cs:.1f}。",
+            "⚖️ {action}。偏差 {dev:+.1f}，{stance}。",
+            "🌐 各模块意见不一。我的{action}指向 {obs:.1f}，共识当前 {cs:.1f}。",
+        ]
+
+
+# ============================================================
+#  ε 幸存者 (懒加载) — v0.5 新增
+# ============================================================
+
+class SurvivorModule(SubModule):
+    """
+    幸存者 (epsilon) — v0.5 新增
+
+    懒加载休眠策略：大部分时间低能耗待机，仅在系统需要时唤醒。
+    设计理念：
+    - 休眠时：极低能耗（10% 正常推演），不参与提案
+    - 唤醒条件：好奇心信号 > 阈值 / 系统置信度暴跌 / 外部唤醒
+    - 唤醒后：以中性视角提出观察，提供"局外人"视角
+
+    代表 HiveMind 的"储备力量"——平常不占资源，关键时刻出场。
+    """
+
+    def __init__(self, config: HiveMindConfig):
+        wallet = EnergyWallet(
+            balance=config.initial_module_energy,  # 与其他模块一致（非节能模式）
+            loan_max=config.innovation_loan_max,
+        )
+        super().__init__(
+            module_id="epsilon_survivor",
+            bias_type="survivor",
+            wallet=wallet,
+            config=config,
+        )
+        self.sleeping = True       # 初始休眠
+        self.sleep_rounds = 0      # 已休眠轮数
+        self.wake_rounds = 0       # 唤醒后活跃轮数
+        self.max_wake_rounds = 10  # 每次唤醒最多活跃 N 轮后重新评估
+
+    def observe(self, raw_data: float) -> float:
+        """幸存者：中性观察，不施加偏见——它是旁观者"""
+        noise = random.gauss(0, self.config.observation_noise * 0.1)  # 低噪声
+        return raw_data + noise
+
+    def propose(self, observation: float, current_consensus: float, round_num: int) -> Optional[Proposal]:
+        """
+        幸存者提议：仅在唤醒时参与。
+
+        休眠状态：
+        - 消耗极小能量（sleep_cost_ratio × inference_cost）
+        - 不生成提案
+        - 不断累计休眠轮数
+
+        唤醒后：
+        - 以中性视角生成提案
+        - 活跃 N 轮后重新评估是否继续醒着
+        """
+        if not self.alive:
+            return None
+
+        # 休眠态：消耗极低能量
+        if self.sleeping:
+            sleep_cost = self.config.inference_cost * self.config.epsilon_sleep_cost_ratio
+            if self.wallet.can_afford(sleep_cost):
+                self.wallet.spend(sleep_cost, reason=f"休眠维护 round={round_num}", floor=self.config.energy_floor)
+                self.sleep_rounds += 1
+            return None
+
+        # 唤醒态：正常参与推演
+        cost = self.config.inference_cost
+        if not self.wallet.can_afford(cost):
+            self.sleeping = True
+            logger.info(f"[epsilon] 能量不足，回到休眠")
+            return None
+
+        self.wallet.spend(cost, reason=f"推演 round={round_num}", floor=self.config.energy_floor)
+        self.total_rounds += 1
+        self.wake_rounds += 1
+
+        # 中性提案：离群观测产生局外人视角
+        biased_estimate = observation
+        noise = random.gauss(0, self.config.observation_noise * 0.15)
+        biased_estimate += noise
+
+        confidence = self._compute_confidence()
+        # 幸存者基础置信度更低（它不常参与，知识可能过时）
+        confidence *= 0.7
+
+        proposal = Proposal(
+            module_id=self.module_id,
+            value=biased_estimate,
+            confidence=confidence,
+            reasoning=f"幸存者唤醒提供, sleep_rounds={self.sleep_rounds}, wake_rounds={self.wake_rounds}",
+            energy_cost=cost,
+            round_number=round_num,
+        )
+        self.last_proposal = proposal
+        self.history.append(biased_estimate)
+
+        # 活跃 N 轮后重新评估
+        if self.wake_rounds >= self.max_wake_rounds:
+            self.sleeping = True
+            self.wake_rounds = 0
+            logger.info(f"[epsilon] 活跃 {self.max_wake_rounds} 轮，回到休眠")
+
+        return proposal
+
+    def try_wake(self, curiosity_signal: float) -> bool:
+        """
+        尝试唤醒：如果好奇心信号超过阈值且能量充足，唤醒模块。
+
+        返回 True 表示已唤醒。
+        """
+        if not self.alive:
+            return False
+
+        if self.sleeping and curiosity_signal >= self.config.epsilon_wake_threshold:
+            if self.wallet.balance > self.config.energy_floor * 2:
+                self.sleeping = False
+                self.wake_rounds = 0
+                logger.info(f"[epsilon] 好奇心信号 {curiosity_signal:.3f} 触发唤醒, 休眠 {self.sleep_rounds} 轮")
+                return True
+
+        return False
+
+    # ── v0.5 表达层 ──
+    def _expression_context(self, observation, current_consensus):
+        deviation = observation - current_consensus
+        if self.sleeping:
+            return {
+                "obs": observation, "cs": current_consensus,
+                "dev": deviation, "abs_dev": abs(deviation),
+                "action": "休眠中",
+                "bias_note": f"已休眠 {self.sleep_rounds} 轮，等待唤醒信号",
+                "stance": "节能待机",
+            }
+        return {
+            "obs": observation, "cs": current_consensus,
+            "dev": deviation, "abs_dev": abs(deviation),
+            "action": "局外人观察",
+            "bias_note": f"休眠 {self.sleep_rounds} 轮后唤醒，提供独立视角",
+            "stance": f"偏差 {abs(deviation):.1f} — 值得注意" if abs(deviation) > 5 else "正常范围内",
+        }
+
+    def _expression_templates(self):
+        if self.sleeping:
+            return [
+                "💤 {bias_note}。共识 {cs:.1f}。{stance}。",
+                "😴 休眠轮数 {sleep_rounds}。观测 {obs:.1f}，但我不说话。",
+            ]
+        return [
+            "👁️ 局外人视角：观测 {obs:.1f} vs 共识 {cs:.1f}，偏差 {dev:+.1f}。{stance}",
+            "🔔 休眠 {sleep_rounds} 轮后唤醒！{bias_note}。",
+            "⏰ 终于醒来了。{action}：差距 {abs_dev:.1f}。{stance}",
+        ]
