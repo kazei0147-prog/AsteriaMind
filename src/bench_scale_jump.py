@@ -1,6 +1,6 @@
 """尺度跳变测试: 10 → 500"""
 import sys, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 from hivemind_v2.learner import Learner, BayesianBelief
 
 random.seed(42)

@@ -1,11 +1,11 @@
 """HiveMind 2.0 CO2 基准测试"""
 import sys, csv
-sys.path.insert(0, 'C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src')
+sys.path.insert(0, 'D:/AM/HiveMind_repo/src')
 from hivemind_v2.learner import Learner
 from hivemind_v2.argument import ArgumentEvaluator
 from hivemind_v2.trust import TrustEngine
 
-reader = csv.DictReader(open('C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
+reader = csv.DictReader(open('D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
 data = [float(r['value']) for r in reader]
 
 learners = [
@@ -37,14 +37,17 @@ for i in range(warmup, min(400, len(data))):
 
     if (i - warmup) % 5 == 0:
         chains = [l.propose(obs) for l in learners]
+        proposals = {l.learner_id: c.proposal_value for l, c in zip(learners, chains)}
         consensus, ranked, method = evaluator.full_discussion(chains)
         consensus_errors.append(abs(consensus - obs))
 
         verify_val = sum(data[i-5:i]) / 5 if i >= 5 else obs
         for l in learners:
-            if l.history:
-                l.learn(verify_val, l.history[-1])
-                trust.verify(l.learner_id, l.history[-1], verify_val)
+            # FIX (2026-07-17): learn() is the only writer of l.history, so the
+            # old `if l.history:` guard deadlocked the learning loop (it never ran).
+            # Verify against THIS round's proposal so the loop actually executes.
+            l.learn(verify_val, proposals[l.learner_id])
+            trust.verify(l.learner_id, proposals[l.learner_id], verify_val)
 
     if i >= warmup + WINDOW:
         ma = sum(data[i-WINDOW:i]) / WINDOW

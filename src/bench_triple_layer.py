@@ -6,7 +6,7 @@ A: BudgetContest 竞标 → 分配资源
 B: 胜者获得搜索权 → 得到新数据 → 学习
 """
 import sys, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 from hivemind_v2.learner import Learner
 from hivemind_v2.trust import TrustEngine

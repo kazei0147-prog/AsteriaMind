@@ -4,7 +4,7 @@ v2.8 FunctionLearner 验证: 学习 y=2x+5 + 结构断层检测
 双入口: FunctionLearner 学结构 + ResidualLearner 学噪声
 """
 import sys, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 from hivemind_v2.function_learner import FunctionLearner
 from hivemind_v2.learner import Learner

@@ -10,7 +10,7 @@ import re
 import sys
 import threading
 import time
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 from hivemind_v2.portal import LiveSource, Portal, ConsoleSink, CuriosityEngine
 

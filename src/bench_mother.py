@@ -7,7 +7,7 @@
   3. Learner 性格保持
 """
 import sys
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 import csv, random
 from hivemind_v2.learner import Learner
@@ -18,7 +18,7 @@ from hivemind_v2.guard import StabilityGuard
 random.seed(42)
 
 reader = csv.DictReader(open(
-    "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/co2_mauna_loa.csv"
+    "D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv"
 ))
 data = [float(r["value"]) for r in reader]
 

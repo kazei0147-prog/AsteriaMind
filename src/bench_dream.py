@@ -1,11 +1,11 @@
 """v2.1 梦境 + 个性 Benchmark"""
 import sys, csv, json, time, os
-sys.path.insert(0, 'C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src')
+sys.path.insert(0, 'D:/AM/HiveMind_repo/src')
 from hivemind_v2.learner import Learner
 from hivemind_v2.dream import DreamStore
 from hivemind_v2.orchestrator import PRESET_PERSONAS
 
-reader = csv.DictReader(open('C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
+reader = csv.DictReader(open('D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
 data = [float(r['value']) for r in reader]
 
 # === 1. 不同先验是否真的分化 ===
@@ -35,7 +35,7 @@ print(f"\n{'='*60}")
 print("测试2: 梦境保存/加载")
 print("=" * 60)
 
-dream_path = "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/dream_v2_test.json"
+dream_path = "D:/AM/HiveMind_repo/experiments/data/dream_v2_test.json"
 store = DreamStore()
 store.save(learners, dream_path)
 

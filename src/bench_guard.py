@@ -10,7 +10,7 @@
 关键断言: Guard 应识别 L1 为 leader, 不应触发 chaos
 """
 import sys
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 import csv
 import random
@@ -23,7 +23,7 @@ random.seed(42)
 
 # ── 加载 CO2 数据 ──
 reader = csv.DictReader(open(
-    "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/co2_mauna_loa.csv"
+    "D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv"
 ))
 data = [float(r["value"]) for r in reader]
 

@@ -5,7 +5,7 @@ Test 1 vFinal: Proposal Diversity — 强制差异化验证
         阈值需要针对特定数据域校准。本测试用极端参数验证架构正确性。
 """
 import sys, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 from hivemind_v2.learner import Learner
 
 random.seed(42)

@@ -8,7 +8,7 @@
 第四触发器: curiosity → "search" → WebSearch → push_result → HM 处理
 """
 import sys, time
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 from hivemind_v2.learner import Learner
 from hivemind_v2.trust import TrustEngine

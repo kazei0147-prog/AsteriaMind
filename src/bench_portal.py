@@ -5,7 +5,7 @@ v2.4 持续运行 + Portal I/O 验证
 输出通过 ConsoleSink 实时可见。
 """
 import sys
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 import csv, os
 from hivemind_v2.learner import Learner
@@ -17,7 +17,7 @@ from hivemind_v2.portal import (
 )
 
 # ── 数据源: CO2 数据，不循环（模拟有限数据流） ──
-data_path = ("C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/"
+data_path = ("D:/AM/"
              "HiveMind_repo/experiments/data/co2_mauna_loa.csv")
 source = CSVSource(data_path, loop=False)
 

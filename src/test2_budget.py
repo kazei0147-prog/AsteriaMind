@@ -8,7 +8,7 @@ Test 2: BudgetContest — 竞标机制验证
 4. 不同 Learner 交替获胜
 """
 import sys, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 from hivemind_v2.budget_contest import BudgetContest, ExplorationProposal
 
 random.seed(123)

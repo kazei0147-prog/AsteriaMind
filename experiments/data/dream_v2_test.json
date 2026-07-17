@@ -4,58 +4,68 @@
   "learners": [
     {
       "learner_id": "L1_optimist",
-      "window_size": 5,
-      "mu": -0.07099214631771411,
-      "sigma": 0.1,
+      "mu": 1.2412648776813373,
+      "sigma": 2.7782506209774835,
       "alpha": 1.4999999999999893,
+      "scale_location": 413.7615725072815,
+      "scale": 2.843134187074428,
+      "window_size": 5,
       "total_rounds": 100,
       "successes": 100,
-      "track_record": 1.0,
-      "avg_error": 2.4846824107541736
+      "adaptive_scale": true,
+      "robust_likelihood": false
     },
     {
       "learner_id": "L2_pessimist",
-      "window_size": 5,
-      "mu": -0.11273688408753724,
-      "sigma": 0.1,
+      "mu": -0.9596362615968052,
+      "sigma": 2.7782506209774835,
       "alpha": 1.4999999999999893,
+      "scale_location": 413.7615725072815,
+      "scale": 2.843134187074428,
+      "window_size": 5,
       "total_rounds": 100,
-      "successes": 100,
-      "track_record": 1.0,
-      "avg_error": 2.5008620233196486
+      "successes": 98,
+      "adaptive_scale": true,
+      "robust_likelihood": false
     },
     {
       "learner_id": "L3_skeptic",
-      "window_size": 10,
-      "mu": -0.0888226115820705,
-      "sigma": 0.1,
+      "mu": 0.2067904438562067,
+      "sigma": 3.7065875122407563,
       "alpha": 1.4999999999999893,
+      "scale_location": 413.7615725072815,
+      "scale": 2.843134187074428,
+      "window_size": 10,
       "total_rounds": 100,
-      "successes": 100,
-      "track_record": 1.0,
-      "avg_error": 3.363073940146702
+      "successes": 93,
+      "adaptive_scale": true,
+      "robust_likelihood": false
     },
     {
       "learner_id": "L4_stubborn",
-      "window_size": 3,
-      "mu": -0.07797343525656053,
-      "sigma": 0.1,
+      "mu": -0.09406916132675279,
+      "sigma": 2.1151528415037197,
       "alpha": 1.4999999999999893,
+      "scale_location": 413.7615725072815,
+      "scale": 2.843134187074428,
+      "window_size": 3,
       "total_rounds": 100,
       "successes": 100,
-      "track_record": 1.0,
-      "avg_error": 1.6486535358013845
+      "adaptive_scale": true,
+      "robust_likelihood": false
     },
     {
       "learner_id": "L5_adaptable",
-      "window_size": 12,
-      "mu": -0.07858604316962438,
-      "sigma": 0.1,
+      "mu": -0.41423871905172877,
+      "sigma": 3.0434897327669908,
       "alpha": 1.4999999999999893,
+      "scale_location": 413.7615725072815,
+      "scale": 2.843134187074428,
+      "window_size": 12,
       "total_rounds": 100,
-      "successes": 100,
-      "track_record": 1.0,
-      "avg_error": 2.686176818986873
+      "successes": 98,
+      "adaptive_scale": true,
+      "robust_likelihood": false
     }
   ]
 }

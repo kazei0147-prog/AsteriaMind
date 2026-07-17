@@ -1,11 +1,11 @@
 """HM 2.0 vs 移动平均: 连续异常注入测试"""
 import sys, csv, random
-sys.path.insert(0, 'C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src')
+sys.path.insert(0, 'D:/AM/HiveMind_repo/src')
 from hivemind_v2.learner import Learner
 from hivemind_v2.argument import ArgumentEvaluator
 from hivemind_v2.trust import TrustEngine
 
-reader = csv.DictReader(open('C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
+reader = csv.DictReader(open('D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
 data = [float(r['value']) for r in reader]
 
 random.seed(42)

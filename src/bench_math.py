@@ -7,7 +7,7 @@ Learner 需要从历史数据中学会这个线性关系。
 关键指标: 信念 μ 是否收敛到 ~2（斜率），误差是否下降。
 """
 import sys, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 from hivemind_v2.learner import Learner
 from hivemind_v2.trust import TrustEngine

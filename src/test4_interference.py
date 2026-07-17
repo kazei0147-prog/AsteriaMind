@@ -7,14 +7,14 @@ Test 4: 干扰测试 — 传感器故障后系统行为
 3. Learner 反应不单一
 """
 import sys, csv, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 from hivemind_v2.learner import Learner
 from hivemind_v2.budget_contest import BudgetContest, ExplorationProposal
 
 random.seed(42)
 
 reader = csv.DictReader(open(
-    "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/experiments/data/co2_mauna_loa.csv"
+    "D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv"
 ))
 co2 = [float(r["value"]) for r in reader][:350]
 

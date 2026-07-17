@@ -4,7 +4,7 @@ WebSearch → LiveSource → HiveMind 2.4 端到端演示
 用刚才 WebSearch 拿到的真实 Mauna Loa CO2 数据喂 HM。
 """
 import sys, time, random
-sys.path.insert(0, "C:/Users/Administrator/WorkBuddy/2026-07-01-13-51-12/HiveMind_repo/src")
+sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 from hivemind_v2.learner import Learner
 from hivemind_v2.trust import TrustEngine
