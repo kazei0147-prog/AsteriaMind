@@ -273,6 +273,80 @@ class Learner:
             return float("inf")
         return sum(self.error_history) / len(self.error_history)
 
+    # ──────────── v2.9: 子模块探索驱动 ────────────
+
+    def exploration_drive(self) -> dict | None:
+        """
+        Learner 自主产生探索欲望。
+
+        基于:
+        - 当前不确定性 (sigma)
+        - 最近意外程度 (surprise ratio)
+        - 历史准确率
+
+        返回 None = "我不需要探索"
+        返回 dict = 探索提案 {query, hypothesis, value, cost, source}
+        """
+        sigma = self.belief.sigma
+        track = self.track_record()
+
+        # 不确定积分: sigma 大 + 准确率低 = 我需要更多信息
+        uncertainty = sigma / max(self.scale_tracker.scale, 0.1)
+
+        # 意外: 最近残差偏离正常范围
+        surprise = 0.0
+        if len(self.error_history) >= 5:
+            recent = self.error_history[-5:]
+            older = self.error_history[-15:-5] if len(self.error_history) > 15 else self.error_history[:-5]
+            if older:
+                old_avg = sum(older) / len(older)
+                recent_avg = sum(recent) / len(recent)
+                if old_avg > 0.01:
+                    surprise = recent_avg / old_avg - 1.0
+
+        drive = uncertainty * 0.5 + max(surprise, 0) * 0.5
+
+        # 新手动力: 几乎没有历史 → 自然想探索
+        if len(self.error_history) < 3:
+            drive += 0.4
+
+        if drive < 0.2:
+            return None  # 不探索，挺确定
+
+        # 生成探索 query — 基于 Learner 的困惑 + 个性
+        if "optimist" in self.learner_id.lower():
+            angle = "upward trend growth acceleration"
+        elif "pessimist" in self.learner_id.lower() or "stubborn" in self.learner_id.lower():
+            angle = "confirmation bias check conservative estimate"
+        elif "skeptic" in self.learner_id.lower():
+            angle = "alternative hypothesis contradiction evidence"
+        else:
+            angle = "cross-reference verification"
+
+        if sigma > 15:
+            source = "sigma_high"
+            query = f"latest data reading {angle} (uncertainty:{sigma:.0f})"
+            hypothesis = "我需要更多数据来降低不确定性"
+            value = min(drive, 0.9)
+        elif surprise > 1.0:
+            source = "surprise"
+            query = f"anomaly detection unexpected change {angle}"
+            hypothesis = f"最近观测偏离预期 {surprise*100:.0f}%，可能发生结构性变化"
+            value = min(surprise * 0.5, 0.95)
+        else:
+            source = "curiosity"
+            query = f"trend analysis {angle} related data"
+            hypothesis = "我想验证当前趋势是否普遍"
+            value = drive * 0.4
+
+        return {
+            "query": query,
+            "hypothesis": hypothesis,
+            "value": value,
+            "cost": 1.0 + sigma * 0.1 / max(self.scale_tracker.scale, 0.1),
+            "source": source,
+        }
+
     def beliefs_summary(self) -> str:
         return (
             f"{self.learner_id}: N(μ={self.belief.mu:.2f}, "
