@@ -251,16 +251,20 @@ class MotherMind:
 
         return decision
 
-    def formulate_query(self, learners) -> str:
+    def formulate_query(self, learners, function_learner=None) -> str:
         """
-        v2.7: 当 CuriosityEngine 触发 knowledge_gap 时，
-        MotherMind 基于当前认知状态自动生成搜索词。
+        v2.7: 自动生成搜索词。
+        v2.8: 支持结构断层搜索策略。
+        """
+        # v2.8: 结构断层 → 搜规律而非最新值
+        if function_learner is not None and function_learner.structure_gaps > 0:
+            a, b = function_learner.theta[0], function_learner.theta[1]
+            return (
+                f"trend analysis linear model y={a:.2f}x+{b:.2f} "
+                f"structure change detection latest data 2026"
+            )
 
-        策略:
-        - 从 Learner 的 ScaleTracker 推断数据域
-        - 综合最不确定的 Learner 的关注点
-        """
-        # 推断数据域
+        # 常规: 从 Learner ScaleTracker 推断数据域
         avg_location = 0
         n = 0
         for l in learners:
@@ -273,7 +277,6 @@ class MotherMind:
         avg_location /= n
         most_uncertain = max(learners, key=lambda l: l.belief.sigma)
 
-        # 数据域推断
         if 400 < avg_location < 450:
             domain = "Mauna Loa CO2 atmospheric concentration"
         elif avg_location > 1000:

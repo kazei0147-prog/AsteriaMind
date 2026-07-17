@@ -197,6 +197,7 @@ class CuriosityEngine:
         last_decision_confidence: float,
         learners,
         seconds_since_last_data: float,
+        function_learner=None,  # v2.8: FunctionLearner for structure_gap
     ) -> tuple:
         now = time.time()
 
@@ -211,6 +212,12 @@ class CuriosityEngine:
             self.search_count += 1
             self.last_poll_time = now
             return "search", f"知识缺口 (连续{self.knowledge_gap_rounds}轮低置信)"
+
+        # 条件5: 结构断层 (v2.8) — FunctionLearner 检测到规律变了
+        if function_learner is not None and function_learner.structure_gap():
+            self.search_count += 1
+            self.last_poll_time = now
+            return "search", "结构断层 (函数规律已改变, 需要新数据验证)"
 
         # 防抖 (搜索优先于防抖)
         if now - self.last_poll_time < self.max_poll_interval:
