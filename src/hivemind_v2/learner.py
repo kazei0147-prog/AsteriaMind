@@ -182,6 +182,9 @@ class Learner:
         self.learner_id = name or f"learner_{Learner._next_id}"
         Learner._next_id += 1
 
+        self.last_feedback: Optional[str] = None  # Mother 的反馈（v2.10+）
+        self.learning_rate_boost: float = 1.0     # 临时学习率倍率
+
         self.belief = BayesianBelief(
             mu=initial_mu,
             sigma=initial_sigma,
@@ -259,9 +262,11 @@ class Learner:
         data_scale = max(self.scale_tracker.scale, 0.1)
         self.belief.update(
             error=error,
-            learning_rate=0.1,
+            learning_rate=0.1 * self.learning_rate_boost,
             data_scale=data_scale,
         )
+        # boost 衰减：每次学习后向 1.0 回归 10%
+        self.learning_rate_boost = 1.0 + (self.learning_rate_boost - 1.0) * 0.9
 
     def track_record(self) -> float:
         """历史成功率"""
@@ -353,6 +358,22 @@ class Learner:
             f"scale={self.scale_tracker.scale:.1f} "
             f"track={self.track_record():.2f}"
         )
+
+    # ── MotherMind 反馈接口 (v2.10+) ──
+
+    def adjust_window(self, delta: int):
+        """调整观测窗口大小。delta>0 加大, delta<0 缩小。"""
+        self.window_size = max(2, min(50, self.window_size + delta))
+
+    def set_robust(self, enabled: bool):
+        """切换稳健似然模式 (Student-t)。"""
+        self.belief.robust_likelihood = enabled
+
+    def boost_learning(self, factor: float = 2.0):
+        """临时加速学习（放大 belief.update 的 effective learning_rate）。"""
+        self.learning_rate_boost = factor
+
+    # ── 导出/导入 ──
 
     def export_state(self) -> dict:
         return {
