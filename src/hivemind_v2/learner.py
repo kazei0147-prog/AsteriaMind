@@ -293,27 +293,26 @@ class Learner:
         # 不确定积分: sigma 大 + 准确率低 = 我需要更多信息
         uncertainty = sigma / max(self.scale_tracker.scale, 0.1)
 
-        # 意外: 最近残差偏离正常范围
+        # 意外: 最近残差 vs 历史基线 (比例变化, 不依赖绝对尺度)
         surprise = 0.0
         if len(self.error_history) >= 5:
             recent = self.error_history[-5:]
             older = self.error_history[-15:-5] if len(self.error_history) > 15 else self.error_history[:-5]
-            if older:
-                old_avg = sum(older) / len(older)
+            if older and len(older) >= 3:
+                old_avg = sum(older) / len(older) + 0.01
                 recent_avg = sum(recent) / len(recent)
-                if old_avg > 0.01:
-                    surprise = recent_avg / old_avg - 1.0
+                surprise = max(0, (recent_avg / old_avg) - 1.0)
 
-        drive = uncertainty * 0.5 + max(surprise, 0) * 0.5
+        drive = uncertainty * 0.3 + max(surprise, 0) * 0.5
 
-        # 新手动力: 几乎没有历史 → 自然想探索
-        if len(self.error_history) < 3:
-            drive += 0.4
+        # 新手动力
+        novelty = 0.4 if len(self.error_history) < 3 else 0.0
+        drive += novelty
 
-        if drive < 0.2:
+        if drive < 0.12:
             return None  # 不探索，挺确定
 
-        # 生成探索 query — 基于 Learner 的困惑 + 个性
+        # 生成探索 query — surprise 优先
         if "optimist" in self.learner_id.lower():
             angle = "upward trend growth acceleration"
         elif "pessimist" in self.learner_id.lower() or "stubborn" in self.learner_id.lower():
@@ -323,21 +322,21 @@ class Learner:
         else:
             angle = "cross-reference verification"
 
-        if sigma > 15:
+        if surprise > 0.5:
+            source = "surprise"
+            query = f"anomaly detection unexpected change {angle}"
+            hypothesis = f"最近误差增长 {surprise*100:.0f}%，可能发生结构性变化或传感器漂移"
+            value = min(surprise * 0.4, 0.95)
+        elif sigma > 15:
             source = "sigma_high"
             query = f"latest data reading {angle} (uncertainty:{sigma:.0f})"
             hypothesis = "我需要更多数据来降低不确定性"
             value = min(drive, 0.9)
-        elif surprise > 1.0:
-            source = "surprise"
-            query = f"anomaly detection unexpected change {angle}"
-            hypothesis = f"最近观测偏离预期 {surprise*100:.0f}%，可能发生结构性变化"
-            value = min(surprise * 0.5, 0.95)
         else:
             source = "curiosity"
             query = f"trend analysis {angle} related data"
             hypothesis = "我想验证当前趋势是否普遍"
-            value = drive * 0.4
+            value = drive * 0.3
 
         return {
             "query": query,
