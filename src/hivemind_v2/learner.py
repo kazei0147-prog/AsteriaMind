@@ -98,11 +98,12 @@ class Learner:
     
     _next_id = 0
     
-    def __init__(self, name: Optional[str] = None, window_size: int = 10):
+    def __init__(self, name: Optional[str] = None, window_size: int = 10,
+                 initial_mu: float = 0.0, initial_sigma: float = 10.0):
         self.learner_id = name or f"learner_{Learner._next_id}"
         Learner._next_id += 1
         
-        self.belief = BayesianBelief()
+        self.belief = BayesianBelief(mu=initial_mu, sigma=initial_sigma)
         self.window_size = window_size
         self.observation_window: List[float] = []
         self.history: List[float] = []            # 所有提案历史
@@ -110,6 +111,28 @@ class Learner:
         self.total_rounds = 0
         self.successes = 0                         # 误差 < 阈值的次数
         self.alive = True
+    
+    def export_state(self) -> dict:
+        """导出学习器完整状态（供梦境持久化）"""
+        return {
+            "learner_id": self.learner_id,
+            "window_size": self.window_size,
+            "mu": self.belief.mu,
+            "sigma": self.belief.sigma,
+            "alpha": self.belief.alpha,
+            "total_rounds": self.total_rounds,
+            "successes": self.successes,
+            "track_record": self.track_record(),
+            "avg_error": self.average_error(),
+        }
+    
+    def load_state(self, state: dict):
+        """从导出的状态恢复学习器"""
+        self.belief.mu = state.get("mu", 0.0)
+        self.belief.sigma = state.get("sigma", 10.0)
+        self.belief.alpha = state.get("alpha", 1.0)
+        self.total_rounds = state.get("total_rounds", 0)
+        self.successes = state.get("successes", 0)
     
     def observe(self, data: float):
         """接收观测数据，更新窗口"""

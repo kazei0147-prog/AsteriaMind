@@ -1,12 +1,7 @@
 """
-调度器 - HiveMind 2.0 的主循环
+调度器 - HiveMind 2.0 的主循环 v2.1
 
-与 v0.x MotherModule 的根本区别:
-- 预处理暖身期: 先运行 N 轮让学习器积累经验（偏见自然涌现）
-- 不是每轮都做加权平均; 而是定期触发"讨论回合"
-- 讨论回合中: 学习器提案 → 互看推理链 → 修正 → 评估 → 共识
-- 事后验证: 用验证集评估每个学习器的提案，更新信任
-- 没有 energy/energy_floor/death/adoption_reward 等概念
+v2.1 新增: 差异化初始先验 + 梦境记忆(checkpoint 保存/加载)
 """
 
 import random
@@ -15,18 +10,23 @@ from typing import List, Optional
 from .learner import Learner
 from .argument import ArgumentEvaluator
 from .trust import TrustEngine
+from .dream import DreamStore
 
 logger = logging.getLogger("hivemind_v2.orchestrator")
 
 
+# 预设的学习器个性配置
+PRESET_PERSONAS = [
+    {"name": "L1_optimist",    "mu": +3.0, "sigma": 8.0,  "window": 5,  "hint": "天生乐观"},
+    {"name": "L2_pessimist",   "mu": -3.0, "sigma": 8.0,  "window": 5,  "hint": "天生悲观"},
+    {"name": "L3_skeptic",     "mu":  0.0, "sigma": 15.0, "window": 10, "hint": "高度不确定，爱怀疑"},
+    {"name": "L4_stubborn",    "mu":  0.0, "sigma": 3.0,  "window": 3,  "hint": "很自信，学得慢"},
+    {"name": "L5_adaptable",   "mu":  0.0, "sigma": 10.0, "window": 12, "hint": "灵活，窗口大"},
+]
+
 class HiveMindV2:
     """
     HiveMind 2.0 调度器。
-    
-    生命周期:
-    1. 预热期 (warmup_rounds): 学习器独立观察数据，积累经验
-    2. 运行期: 每 propose_interval 轮触发一次讨论
-    3. 验证期: 每 verify_interval 轮用预留数据事后验证
     """
 
     def __init__(
@@ -36,8 +36,19 @@ class HiveMindV2:
         propose_interval: int = 5,
         debate_rounds: int = 2,
         verify_ratio: float = 0.1,
+        use_personas: bool = True,
     ):
-        self.learners = [Learner(name=f"L{i+1}") for i in range(n_learners)]
+        if use_personas:
+            self.learners = [
+                Learner(
+                    name=p["name"], window_size=p["window"],
+                    initial_mu=p["mu"], initial_sigma=p["sigma"]
+                )
+                for p in PRESET_PERSONAS[:n_learners]
+            ]
+        else:
+            self.learners = [Learner(name=f"L{i+1}") for i in range(n_learners)]
+        
         self.evaluator = ArgumentEvaluator(debate_rounds=debate_rounds)
         self.trust = TrustEngine()
         for l in self.learners:
@@ -49,9 +60,27 @@ class HiveMindV2:
         
         self.round_num = 0
         self.data_buffer: List[float] = []
-        self.verify_buffer: List[float] = []  # 预留的验证数据
+        self.verify_buffer: List[float] = []
         self.consensus_history: List[float] = []
         self.log: List[dict] = []
+
+    def save_dream(self, filepath: str):
+        """v2.1: 保存所有学习器状态到梦境文件"""
+        store = DreamStore()
+        return store.save(self.learners, filepath)
+
+    @classmethod
+    def from_dream(cls, filepath: str, **kwargs) -> "HiveMindV2":
+        """v2.1: 从梦境文件恢复 HiveMind（跳过预热）"""
+        store = DreamStore()
+        states = store.load(filepath)
+        instance = cls(use_personas=False, n_learners=0)  # 空壳
+        instance.learners = DreamStore.restore_learners(states)
+        for l in instance.learners:
+            instance.trust.register(l.learner_id)
+        instance.warmup_rounds = 0  # 不需要预热
+        logger.info(f"从梦境恢复: {len(instance.learners)} 个学习器, 跳过预热")
+        return instance
 
     def _fetch_data(self, datasource) -> Optional[float]:
         """从数据源获取下一个观测值"""

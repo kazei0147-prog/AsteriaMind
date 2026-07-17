@@ -1,0 +1,61 @@
+{
+  "version": "2.0",
+  "n_learners": 5,
+  "learners": [
+    {
+      "learner_id": "L1_optimist",
+      "window_size": 5,
+      "mu": -0.07099214631771411,
+      "sigma": 0.1,
+      "alpha": 1.4999999999999893,
+      "total_rounds": 100,
+      "successes": 100,
+      "track_record": 1.0,
+      "avg_error": 2.4846824107541736
+    },
+    {
+      "learner_id": "L2_pessimist",
+      "window_size": 5,
+      "mu": -0.11273688408753724,
+      "sigma": 0.1,
+      "alpha": 1.4999999999999893,
+      "total_rounds": 100,
+      "successes": 100,
+      "track_record": 1.0,
+      "avg_error": 2.5008620233196486
+    },
+    {
+      "learner_id": "L3_skeptic",
+      "window_size": 10,
+      "mu": -0.0888226115820705,
+      "sigma": 0.1,
+      "alpha": 1.4999999999999893,
+      "total_rounds": 100,
+      "successes": 100,
+      "track_record": 1.0,
+      "avg_error": 3.363073940146702
+    },
+    {
+      "learner_id": "L4_stubborn",
+      "window_size": 3,
+      "mu": -0.07797343525656053,
+      "sigma": 0.1,
+      "alpha": 1.4999999999999893,
+      "total_rounds": 100,
+      "successes": 100,
+      "track_record": 1.0,
+      "avg_error": 1.6486535358013845
+    },
+    {
+      "learner_id": "L5_adaptable",
+      "window_size": 12,
+      "mu": -0.07858604316962438,
+      "sigma": 0.1,
+      "alpha": 1.4999999999999893,
+      "total_rounds": 100,
+      "successes": 100,
+      "track_record": 1.0,
+      "avg_error": 2.686176818986873
+    }
+  ]
+}
