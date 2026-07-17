@@ -157,27 +157,24 @@ HiveMind 不是对现有 AI 范式的改良，而是一次**侧向偏移**：
 
 ## 六、当前状态
 
-**v0.6：DataSource 抽象层 + 自适应奖励 + 蒸馏反馈闭环 + 多轮 checkpoint 对比。**
+**v2.9：四层自治探索 — Learner自由驱动探索、BudgetContest竞标、MotherMind编排。**
 
-- [x] 核心机制定义
-- [x] 能量经济学模型
-- [x] 保底与遗忘协议
-- [x] 通信与调度框架
-- [x] 最小可行原型（MVP）代码 → [`src/hivemind/`](src/hivemind/)
-- [x] v0.1 单机运行测试 → 4 组实验已完成
-- [x] v0.2 保守型（beta）模块实现
-- [x] v0.2 修复 energy_floor 僵尸 bug + 置信度衰减 bug + 奖励分配 bug
-- [x] v0.2 三模块 2000 轮验证 → 2 组实验已完成
-- [x] v0.3 四模块架构（γ/δ 角色对齐）+ 2000 轮验证
-- [x] v0.4 知识蒸馏引擎（8维特征 + 逻辑回归 + 512 bytes checkpoint）
-- [x] v0.5 epsilon 幸存者 + 好奇心动因 + 主动交互表达层
-- [x] **v0.6 DataSource 抽象层**（CSV/API/多源/噪声，插拔式）
-- [x] **v0.6 自适应奖励**（reward × alive_modules / 4，不再手动调参）
-- [x] **v0.6 蒸馏反馈闭环**（模型预测可信度 → 指导奖励分配）
-- [x] **v0.6 多轮 checkpoint 对比**（热启动蒸馏效率提升 2.1×）
-- [x] **v0.6 传感器故障压测**（exp11）→ 暴露"采纳计数信任"根本软肋
-- [x] **v2.0 alpha 学习式共识分支**（`src/hivemind_v2/`）→ CO2 benchmark 误差 31.69→1.07 ppm
-- [ ] 离线环境适配
+v0.x (存档):
+- [x] v0.1-v0.6: 从双模块到知识蒸馏引擎 → [`src/hivemind/`](src/hivemind/)
+- [x] 11 组实验验证 + WHY_HIVEMIND_FAILED.md 失败复盘
+
+v2.x (当前):
+- [x] v2.0 : 学习式共识 (贝叶斯信念替代预设偏见, CO2 benchmark 1.07 ppm)
+- [x] v2.1 : 差异化先验 + 梦境记忆 (checkpoint 保存/加载, 热启动 9.9× 提升)
+- [x] v2.3 : MotherMind 决策者 + Guard 纯架构保护
+- [x] v2.4 : Portal I/O + 好奇心驱动持续运行
+- [x] v2.5 : 自主搜索回路 (knowledge_gap → MotherMind query → WebSearch)
+- [x] v2.6 : ScaleTracker + 尺度自适应 (方案A: 归一化, 方案B: Student-t)
+- [x] v2.7 : 完全自主探索 (knowledge_gap streak fix + MotherMind query)
+- [x] v2.8 : FunctionLearner RLS (y=2x+5 → a=2.0038, R²=0.9912)
+- [x] **v2.9 : 四层自治探索** (Learner.drive → BudgetContest → Winner → MotherFallback)
+- [ ] InterestGraph (反信息茧房 + 兴趣驱动)
+- [ ] FunctionLearner + ResidualLearner 双入口串联
 - [ ] 实际场景验证
 
 > ⚠️ **v0.6 的诚实复盘**：真实数据（exp09-11）暴露出 v0.1-v0.6 "固定偏见加权平均 + 采纳计数信任" 在漂移/污染数据下不可靠。完整复盘见 [`docs/WHY_HIVEMIND_FAILED.md`](docs/WHY_HIVEMIND_FAILED.md)，重构方向见下方 v2.0 alpha。
@@ -263,6 +260,12 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 | `exp09_real_data_source` | v0.6 真实数据 | 1038 | 全球温度异常数据 4/5存活 自适应奖励 蒸馏反馈 |
 | `exp10_checkpoint_compare` | v0.6 Checkpoint对比 | 1038 | 冷vs热启动 蒸馏效率提升2.1×（loss 0.0004→0.00019） |
 | `exp11_sensor_fault` | v0.6 传感器故障压测 | 400 | 无外部校验 → 污染数据绑架共识，误差放大~8倍（催生 v2.0） |
+| `bench_v2_co2` | v2.0 CO2 benchmark | 400 | 贝叶斯共识 1.07 ppm (vs v0.6 31.69, vs 移动平均 1.42) |
+| `bench_multisensor` | v2.0 多传感器容错 | 400 | 故障传感器 HM 3.81 vs 简单平均 16.81 (4.4×) |
+| `bench_learn_calc` | v2.8 学公式+计算 | 200 | y=2x+5 → a=2.0038, R²=0.99, x=1000→2008.78 |
+| `test2_budget` | v2.9 BudgetContest | 50 | 竞标 72/24/4% 分配 + 16% 随机探索 ✅ |
+| `test3_evolution` | v2.9 长期演化 | 400 | 4/4 胜者多样性 + 33 竞标 ✅ |
+| `test4_interference` | v2.9 干扰测试 | 350 | 故障期 4.0 vs 正常 2.8 提案/轮 ✅ |
 
 完整实验报告见 [`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md)。
 
@@ -289,4 +292,4 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 
 ---
 
-*Last updated: 2026-07-16 (v0.6: real data source + adaptive reward + distillation feedback + checkpoint compare + sensor-fault stress test; v2.0 alpha: learning-based consensus branch, CO2 benchmark 31.69→1.07 ppm)*
+*Last updated: 2026-07-17 (v2.9: four-layer autonomous exploration — Learner.drive → BudgetContest → Winner → MotherFallback)*

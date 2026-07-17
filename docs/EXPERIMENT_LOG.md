@@ -557,3 +557,52 @@ See experiments 1-4 above for full v0.1 results.
 
 ### 状态
 2.0 目前是 alpha 验证（单 benchmark 通过），尚未替代 v0.6 主架构。代码在 `src/hivemind_v2/`，复盘文档 `docs/WHY_HIVEMIND_FAILED.md`。
+
+---
+
+## v2.1-v2.9 持续迭代 (2026-07-17)
+
+一次 session 内完成 v2.1→v2.9 的架构重塑。
+
+### v2.1: 差异化先验 + 梦境记忆
+- 每个 Learner 不同的初始 μ/σ → 自然分化
+- DreamStore: checkpoint 保存/加载，热启动误差 0.08 vs 冷启动 0.79 (9.9×)
+
+### v2.3: 母模块升级 + Guard 降级
+- MotherMind: 从记录员变决策者，产出带推理的 Decision
+- Guard: 从思想警察变架构保镖，只保护不变式
+
+### v2.4: Portal I/O + 持续运行
+- Portal: DataSource + OutputSink 统一 I/O
+- CuriosityEngine: 三触发器 → 好奇心驱动轮询
+- run_continuous(): 不死循环，系统自主决定何时看数据
+
+### v2.5-v2.7: 自主搜索回路
+- knowledge_gap 第四触发器 + MotherMind 生成 query
+- WebSearch → SearchDataSource → 结果回流
+
+### v2.6: 尺度自适应
+- ScaleTracker: EMA 追踪数据尺度
+- 方案A: 误差归一化 (200-scale error → mu=-0.1 vs old mu=-50)
+- 方案B: Student-t 离群阻尼 (5000-scale error → mu=-0.01)
+- σ 双向调整: 10→18 (适应新数据尺度)
+
+### v2.8: FunctionLearner
+- RLS 在线回归: y=2x+5 → a=2.0038, R²=0.9912
+- 外推 x=1000 → 2008.78 (0.19% error)
+- structure_gap: 函数关系变化检测
+
+### v2.9: 四层自治探索
+- Layer 1: Learner.exploration_drive() → 子模块产生探索欲
+- Layer 2: BudgetContest → 竞标分配资源
+- Layer 3: 胜者执行搜索
+- Layer 4: MotherMind fallback
+- CuriosityEngine 保留为"注意信号"层
+
+### v2.9 测试套件
+| 测试 | 结果 | 关键指标 |
+|------|:---:|------|
+| Test1: Proposal Diversity | ⚠️ | surprise检测正确; σ/scale校准需改进 |
+| Test2: BudgetContest | ✅ | 72/24/4% 分配 + 16% 随机探索 |
+| Test3: 长期演化 400轮 | ✅ | 4/4 胜者多样性 + 33 竞标 |
+| Test4: 干扰 传感器故障 | ✅ | 故障期 4.0 vs 正常 2.8 提案/轮 |
