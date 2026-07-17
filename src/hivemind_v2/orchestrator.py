@@ -1,14 +1,11 @@
 """
-调度器 - HiveMind 2.4 主循环
+调度器 - HiveMind 2.9 主循环
 
-v2.3 重构:
-- 母模块升级为决策者 (MotherMind) — 综合 Learner 推理做出判断
-- Guard 降级为纯架构保护 — 不再抑制认知过程
-- 讨论流程: 提案 → 母模块深思 → 决策 → 反馈
-
-v2.4 新增:
-- run_continuous() — 持续运行模式，好奇心主动轮询 Portal
-- 系统决定何时看数据，不是被动接收
+v2.9 重构:
+- 四层自主探索管道: CuriosityEngine → Learner.drive() → BudgetContest → MotherMind fallback
+- CuriosityEngine 不再直接触发搜索，而是触发"注意信号"
+- Learner 自己决定是否探索，BudgetContest 分配资源
+- 母模块作为 fallback: 当 Learner 没有有效提案时，自己发起探索
 """
 import random
 import time
@@ -19,6 +16,7 @@ from .trust import TrustEngine
 from .mother import MotherMind, Decision
 from .guard import StabilityGuard
 from .portal import Portal, Emission, CuriosityEngine
+from .budget_contest import BudgetContest, ExplorationProposal
 
 logger = logging.getLogger("hivemind_v2.orchestrator")
 
@@ -72,7 +70,8 @@ class HiveMindV2:
         self.verify_buffer: List[float] = []
         self.consensus_history: List[float] = []
         self.log: List[dict] = []
-        self.decisions: List[Decision] = []  # v2.3: 保存所有决策记录
+        self.decisions: List[Decision] = []
+        self.contest = BudgetContest()        # v2.9: 群体治理
 
     def run(self, datasource, max_rounds: int = 500) -> dict:
         """完整运行流程"""
@@ -159,6 +158,12 @@ class HiveMindV2:
                 portal.seconds_since_last_data(),
             )
 
+            # v2.9: "search" → 四层自主探索管道
+            if should == "search":
+                portal.emit_alert(f"Curiosity: {reason}")
+                self._autonomous_exploration(portal)
+                continue
+
             if should:
                 val = portal.poll()
                 if val is None:
@@ -199,6 +204,50 @@ class HiveMindV2:
 
         portal.emit_status(f"持续运行结束 — {discussions} 次讨论")
         return self._final_summary()
+
+    # ──────────── v2.9: 四层自主探索管道 ────────────
+
+    def _autonomous_exploration(self, portal: Portal):
+        """
+        四层管道:
+          1. CuriosityEngine → 检测到 knowledge_gap / structure_gap
+          2. Learner exploration_drive() → 生成 proposals
+          3. BudgetContest → 竞标，分配资源
+          4. MotherMind fallback → 没有有效提案时，系统级探索
+
+        返回: 是否有探索被执行
+        """
+        # Layer 1: 每个 Learner 产生探索欲
+        proposals = []
+        for l in self.learners:
+            drive = l.exploration_drive()
+            if drive:
+                proposals.append(ExplorationProposal(
+                    learner_id=l.learner_id,
+                    query=drive["query"],
+                    hypothesis=drive["hypothesis"],
+                    expected_value=drive["value"],
+                    cost=drive["cost"],
+                    uncertainty_source=drive["source"],
+                    track_record=l.track_record(),
+                ))
+
+        # Layer 2+3: 竞标
+        if proposals:
+            winners = self.contest.evaluate(proposals)
+            for w in winners:
+                portal.emit_search(w.query)
+                logger.info(
+                    f"探索: [{w.learner_id}] '{w.query[:50]}' "
+                    f"(value={w.expected_value:.2f}, source={w.uncertainty_source})"
+                )
+            return True
+
+        # Layer 4: 母级 fallback — 没人提，MotherMind 自己探索
+        query = self.mother.formulate_query(self.learners)
+        portal.emit_search(f"[系统探索] {query}")
+        logger.info(f"母级探索: '{query}'")
+        return True
 
     def _discussion_round(self, current_obs: float) -> dict:
         """
