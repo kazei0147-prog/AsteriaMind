@@ -26,6 +26,7 @@ for l in learners:
 FAULT_S = 200; FAULT_E = 230; FAULT_BIAS = -50
 
 hm_errs = []; avg_errs = []
+last_proposals = {}
 
 for i in range(50, min(300, len(truth))):
     tv = truth[i]
@@ -40,6 +41,7 @@ for i in range(50, min(300, len(truth))):
     # 讨论(每5轮)
     if (i - 50) % 5 == 0:
         chains = [l.propose(readings[sensor_map[l.learner_id]]) for l in learners]
+        last_proposals = {l.learner_id: c.proposal_value for l, c in zip(learners, chains)}
         consensus, ranked, method = evaluator.full_discussion(chains)
         hm_errs.append((i, abs(consensus - tv)))
 
@@ -48,9 +50,12 @@ for i in range(50, min(300, len(truth))):
     if (i - 50) % vf == 0:
         vv = sum(truth[max(0,i-5):i]) / min(i, 5)
         for l in learners:
-            if l.history:
-                l.learn(vv, l.history[-1])
-                trust.verify(l.learner_id, l.history[-1], vv)
+            pid = l.learner_id
+            if pid in last_proposals:
+                # FIX (2026-07-17): same deadlock as bench_v2 — `if l.history:`
+                # guard + learn() as sole history writer → learning never started.
+                l.learn(vv, last_proposals[pid])
+                trust.verify(pid, last_proposals[pid], vv)
 
     avg_errs.append((i, abs((sA+sB+sC)/3 - tv)))
 

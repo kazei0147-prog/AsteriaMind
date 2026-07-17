@@ -57,14 +57,4 @@ class DreamStore:
     @staticmethod
     def restore_learners(states: List[dict], base_window_size: int = 10) -> List[Learner]:
         """从状态字典列表恢复学习器对象"""
-        learners = []
-        for s in states:
-            l = Learner(
-                name=s["learner_id"],
-                window_size=s.get("window_size", base_window_size),
-                initial_mu=s.get("mu", 0.0),
-                initial_sigma=s.get("sigma", 10.0),
-            )
-            l.load_state(s)
-            learners.append(l)
-        return learners
+        return [Learner.from_state(s) for s in states]
