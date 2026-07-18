@@ -181,16 +181,21 @@ class CuriosityEngine:
         stale_threshold: float = 5.0,
         confidence_low: float = 0.5,
         max_poll_interval: float = 0.1,
-        knowledge_gap_rounds: int = 3,     # 连续低置信轮数 → 触发搜索
+        knowledge_gap_rounds: int = 3,
+        exploration_patience: int = 15,   # v2.10: 结构断层后冷却轮数
     ):
         self.stale_threshold = stale_threshold
         self.confidence_low = confidence_low
         self.max_poll_interval = max_poll_interval
         self.knowledge_gap_rounds = knowledge_gap_rounds
+        self.exploration_patience = exploration_patience
         self.last_poll_time = 0.0
         self._low_confidence_streak = 0
         self._last_search_query = ""
         self.search_count = 0
+        self._gap_cooldown = 0           # 结构断层冷却
+        self._experiment_interval = 30   # 定期实验好奇
+        self._experiment_rounds = 0
 
     def should_poll(
         self,
@@ -213,11 +218,22 @@ class CuriosityEngine:
             self.last_poll_time = now
             return "search", f"知识缺口 (连续{self.knowledge_gap_rounds}轮低置信)"
 
-        # 条件5: 结构断层 (v2.8) — FunctionLearner 检测到规律变了
+        # 条件5: 结构断层 (有耐心)
+        self._gap_cooldown += 1
         if function_learner is not None and function_learner.structure_gap():
+            if self._gap_cooldown >= self.exploration_patience:
+                self._gap_cooldown = 0
+                self.search_count += 1
+                self.last_poll_time = now
+                return "search", "结构断层 (触发探索实验)"
+
+        # 条件6: 定期实验好奇 (v2.10)
+        self._experiment_rounds += 1
+        if self._experiment_rounds >= self._experiment_interval:
+            self._experiment_rounds = 0
             self.search_count += 1
             self.last_poll_time = now
-            return "search", "结构断层 (函数规律已改变, 需要新数据验证)"
+            return "experiment", "定期实验 (检验当前假设是否最优)"
 
         # 防抖 (搜索优先于防抖)
         if now - self.last_poll_time < self.max_poll_interval:
