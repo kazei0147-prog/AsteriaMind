@@ -77,11 +77,17 @@ class BasisLearner:
         self._x_hist: List[float] = []
         self._y_hist: List[float] = []
         self._max_history = 200
+        self._r2_peak = 0.0
 
     def update(self, x: float, y: float) -> float:
         phi = self.basis.phi(x)
         y_pred = sum(phi[i] * self.theta[i] for i in range(self.dim))
         error = y - y_pred
+
+        # 崩溃检测: R² 从峰值坠落 > 80% → 重置协方差
+        if self._r2_peak > 0.5 and self.r_squared < self._r2_peak * 0.2:
+            self.P = [[1000.0 if i == j else 0.0 for j in range(self.dim)] for i in range(self.dim)]
+            self._r2_peak = 0.0
 
         # RLS (with L2 decay)
         P_phi = [sum(self.P[i][j] * phi[j] for j in range(self.dim)) for i in range(self.dim)]
@@ -114,6 +120,8 @@ class BasisLearner:
             ss_tot = sum((yi - y_mean) ** 2 for yi in ys) + 1e-8
             self.r_squared = max(0.0, 1.0 - ss_res / ss_tot)
             self.residual_std = math.sqrt(ss_res / recent_n) if recent_n > 0 else 1.0
+            if self.r_squared > self._r2_peak:
+                self._r2_peak = self.r_squared
 
         return error
 
