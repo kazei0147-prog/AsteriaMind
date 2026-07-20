@@ -287,6 +287,44 @@ See experiments 1-4 above for full v0.1 results.
    - 3 modules (v0.2): reward=15 → barely sustainable (2 struggling) → reward=15 confirmed borderline
    - 4 modules (v0.3): reward=15 → all struggling ✗
    - 4 modules (v0.3): reward=25 → all thriving ✓
+
+---
+
+## v3.0-alpha: Knowledge Core + World Model (2026-07-20)
+
+### 背景
+v2.10 完成了一系列自省工具 (CrossValidator, Isolation, DiagnosticEngine, Curiosity)。但这些是"免疫系统"——需要宿主。
+v3.0 方向: 从数值模式识别 → 结构化知识表征 + 预测-验证闭环。
+
+### 新增模块
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| KnowledgeGraph | `knowledge.py` | 贝叶斯信念知识图谱 (α/β, 反证据, 成长追踪) |
+| WorldModel | `world_model.py` | 预测-验证闭环 (Knowledge→Predict→Reality→Update) |
+
+### 核心发现
+
+1. **知识需要贝叶斯信念, 不是单一置信度**:
+   - 旧: confidence=0.7 (只是一个数)
+   - 新: α=32 β=5.3 (支持证据 32 条, 反对证据 5.3 条)
+   - 能回答"你多确定?"、"什么情况下你会错?"
+
+2. **反证据比正面证据更有价值**:
+   - "苹果 IS_A 水果" → 置信度 0.86, 但有 3 条反证据 ("发酵后是饮品")
+   - 存储"什么情况下不成立"比存储"看了 100 次都是对"更有认知价值
+
+3. **预测-验证闭环让知识"活"起来**:
+   - 4 条预测 → 2 对 2 错 → 准确率 50%
+   - 正确的预测强化信念, 错误的预测记录反证据
+   - 知识不再是"存进去就不动了"的死数据
+
+### 架构方向
+- [x] KnowledgeGraph (贝叶斯信念 + 反证据 + 成长追踪)
+- [x] WorldModel (预测→验证→更新)
+- [ ] 模块→知识自动归档 (MetaLearner 发现自动写回 KnowledgeGraph)
+- [ ] Learning Pipeline (文本→概念→关系→假说→验证)
+- [ ] Skill Library (缺口→生成→测试→保存)
    - **Rule of thumb**: required_reward ≈ N_modules × 6-7 (cost × 1.2-1.4 buffer)
 
 **Architectural Validation**:
