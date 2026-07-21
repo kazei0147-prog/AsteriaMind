@@ -315,6 +315,7 @@ class KnowledgeGraph:
                 "prediction": f"如果 H1 正确, 应观察到: {target_entity} {best['predicate']} {best['counterpart']} 这种情况频繁出现",
                 "test": "多次观察",  # default test method
                 "discrimination": f"区别于 H2: H1 预测 {target_entity} 主动影响 {best['counterpart']}, H2 预测它们都是被动结果",
+                "complexity": {"free_params": 1, "assumptions": 1, "base_cost": 0.0},
             })
 
         # ── H2: 共同原因 (共享邻居 → 被同一个上级驱动) ──
@@ -330,6 +331,7 @@ class KnowledgeGraph:
                 "prediction": f"如果 H2 正确, 应观察到: 移除 {cc['cause']} 后, {target_entity} 和 {cc['associated']} 不再相关",
                 "test": "条件独立",
                 "discrimination": f"区别于 H1: H2 认为相关性来自共同父节点, 而非 {target_entity} 自身的属性",
+                "complexity": {"free_params": 1, "assumptions": 2, "base_cost": 0.05},
             })
 
         # ── H3: 表面相似 (低置信度 → 巧合) ──
@@ -342,6 +344,7 @@ class KnowledgeGraph:
             "prediction": f"如果 H3 正确, 应观察到: {target_entity} 与其他实体的关系没有规律, 增加数据后相似度下降而非上升",
             "test": "增加样本量",
             "discrimination": "区别于 H1/H2: H3 预测持续增加数据不会让关系变强",
+            "complexity": {"free_params": 0, "assumptions": 0, "base_cost": 0.0},
         })
 
         # ── H4: 间接路径 (缺失的中间节点) ──
@@ -357,14 +360,14 @@ class KnowledgeGraph:
                 "prediction": f"如果 H4 正确, 应观察到: {target_entity} 影响 {ip['mid']}, {ip['mid']} 再影响 {ip['target']}, 而非直接连接",
                 "test": "中介分析",
                 "discrimination": f"区别于 H1: H4 预测关系是间接的, 控制 {ip['mid']} 后直接效应消失",
+                "complexity": {"free_params": 2, "assumptions": 2, "base_cost": 0.10},
             })
 
         result = sorted(hypos, key=lambda h: -h["confidence"])
 
-        # ── 元假说: 现有解释框架够吗? ──
+        # ── 元假说 ──
         coverage = sum(h["confidence"] for h in result[:3])
         if coverage < 0.6:
-            # 超过 40% 的变异未被现有框架解释 → 生成新假说类型
             residual = 1.0 - coverage
             novel_pattern = self._analyze_residual(target_entity, sigs, residual)
             h5 = {
@@ -377,10 +380,41 @@ class KnowledgeGraph:
                 "test": "探索性分析",
                 "discrimination": "区别于 H1-H4: 需要一个现有框架无法描述的新机制",
                 "meta": True,
+                "complexity": {
+                    "free_params": novel_pattern.get("param_count", 2),
+                    "assumptions": novel_pattern.get("assumption_count", 3),
+                    "base_cost": 0.15,  # 未知机制的固有复杂性惩罚
+                },
             }
             result.append(h5)
 
+        # ── 奥卡姆剃刀: 重新打分, 惩罚复杂假说 ──
+        result = self._apply_occam(result)
         return result
+
+    def _apply_occam(self, hypotheses: list[dict]) -> list[dict]:
+        """
+        奥卡姆剃刀评分:
+          Score = 置信度 + 证据匹配 - α·自由参数 - β·假设数 - 固有代价
+
+        目的: 防止"上帝变量"假说每次都赢。
+        越复杂的假说需要越强的证据才能胜出。
+        """
+        ALPHA = 0.10   # 每个自由参数的惩罚
+        BETA = 0.08    # 每个假设的惩罚
+
+        for h in hypotheses:
+            cx = h.get("complexity", {})
+            params = cx.get("free_params", 0)
+            assumptions = cx.get("assumptions", 0)
+            base = cx.get("base_cost", 0)
+
+            evidence = h.get("confidence", 0)
+            occam_score = evidence - ALPHA * params - BETA * assumptions - base
+            h["occam_score"] = round(max(0.0, occam_score), 3)
+            h["complexity_breakdown"] = f"参数×{params} 假设×{assumptions} 固有:{base:.2f}"
+
+        return sorted(hypotheses, key=lambda h: -h["occam_score"])
 
     def _analyze_residual(self, entity, sigs, residual) -> dict:
         """

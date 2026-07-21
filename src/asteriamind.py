@@ -269,7 +269,13 @@ class AsteriaShell(cmd.Cmd):
 
         # ── Step 2: 多假说竞争 ──
         hypotheses = kg.generate_competing_hypotheses(goal["target"], goal["type"])
-        print(f"\n  💭 关于\"{goal['target']}\"的 {len(hypotheses)} 个竞争假说:")
+        print(f"\n  💭 关于\"{goal['target']}\"的 {len(hypotheses)} 个竞争假说 (奥卡姆已应用):")
+        print(f"    {'ID':3s} {'机制':8s} {'置信度':>6s} {'奥卡姆':>6s} {'复杂度':>14s}")
+        for h in hypotheses:
+            cx = h.get("complexity", {})
+            cost = f"参×{cx.get('free_params',0)} 假×{cx.get('assumptions',0)}"
+            occam = h.get("occam_score", h["confidence"])
+            print(f"    {h['id']:3s} {h['mechanism']:8s} {h['confidence']:5.3f}  {occam:5.3f}  {cost:>14s}")
         for h in hypotheses:
             print(f"\n     {h['id']}: {h['label']}")
             print(f"     机制: {h['mechanism']}")
