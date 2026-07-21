@@ -298,46 +298,47 @@ class KnowledgeGraph:
         else:
             search_entity = target_entity
 
-        # ── 图拓扑相似性: 两个实体共享的 predicate 越多, 越相似 ──
+        # ── 图拓扑相似性 ──
         entity_signatures = self._build_signatures()
+        target_sig = entity_signatures.get(search_entity, set())
 
-        target_sig = entity_signatures.get(search_entity, {})
         if not target_sig:
             return self._fallback_hypotheses(target, target_type)
 
-        # 已有的关系 (避免重复假说)
-        existing_predicates = set(target_sig.keys())
+        existing_predicates = set(p for p, _ in target_sig)
 
         similarities = []
         for other_entity, other_sig in entity_signatures.items():
             if other_entity == search_entity:
                 continue
-            # Jaccard: 共享 predicate / 总 predicate
-            shared = set(target_sig.keys()) & set(other_sig.keys())
-            total = set(target_sig.keys()) | set(other_sig.keys())
+            # Jaccard: shared signature tuples / total
+            shared = target_sig & other_sig
+            total = target_sig | other_sig
             if not total:
                 continue
             sim = len(shared) / len(total)
             if sim > 0:
                 # 对方有但 target 没有的 predicate
-                novel = set(other_sig.keys()) - existing_predicates
+                novel = set(p for p, _ in other_sig) - existing_predicates
                 for pred in novel:
-                    rel = other_sig[pred]
-                    similarities.append({
-                        "source_entity": other_entity,
-                        "predicate": pred,
-                        "object": rel.object,
-                        "similarity": sim,
-                        "source_confidence": rel.confidence,
-                    })
+                    # 找到该 predicate 在对方中的 counterpart
+                    counterparts = [cp for p, cp in other_sig if p == pred]
+                    for cp in counterparts:
+                        similarities.append({
+                            "source_entity": other_entity,
+                            "predicate": pred,
+                            "counterpart": cp,
+                            "similarity": sim,
+                            "source_confidence": 0.5,
+                        })
 
-        similarities.sort(key=lambda s: -s["similarity"] * s["source_confidence"])
+        similarities.sort(key=lambda s: -s["similarity"])
 
         for s in similarities[:5]:
-            statement = f"{search_entity} 可能也 {s['predicate']} {s['object']}"
+            statement = f"{search_entity} 可能也 {s['predicate']} {s['counterpart']}"
             based_on = (f"与\"{s['source_entity']}\"结构相似度 {s['similarity']:.2f}, "
-                       f"它有 {s['predicate']} 关系 (置信度 {s['source_confidence']:.2f})")
-            conf = s["similarity"] * s["source_confidence"] * 0.5
+                       f"它有 {s['predicate']} 关系")
+            conf = s["similarity"] * 0.4  # 图相似驱动的置信度
             hypotheses.append({
                 "statement": statement,
                 "based_on": based_on,
@@ -350,12 +351,18 @@ class KnowledgeGraph:
         return hypotheses
 
     def _build_signatures(self) -> dict:
-        """建立实体签名: {entity_name: {predicate: Relation}}"""
-        sigs = {}
+        """
+        建立实体签名: {entity_name: set of (predicate, counterpart)} 元组。
+
+        不是 predicate → Relation 的一对一映射,
+        而是 predicate + 对方实体的组合, 区分"被A拥有的X"和"被B拥有的X"。
+        """
+        sigs: dict[str, set] = {}
         for r in self.relations:
-            sigs.setdefault(r.subject, {})[r.predicate] = r
-            # 反向: object 也作为实体签名的一部分
-            sigs.setdefault(r.object, {})[f"is_{r.predicate}_of"] = r
+            # subject 的签名: 包含 (predicate, object)
+            sigs.setdefault(r.subject, set()).add((r.predicate, r.object))
+            # object 的签名: 包含 (incoming_predicate, subject)
+            sigs.setdefault(r.object, set()).add((f"←{r.predicate}", r.subject))
         return sigs
 
     def _fallback_hypotheses(self, target: str, target_type: str) -> list[dict]:
