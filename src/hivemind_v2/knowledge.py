@@ -359,7 +359,60 @@ class KnowledgeGraph:
                 "discrimination": f"区别于 H1: H4 预测关系是间接的, 控制 {ip['mid']} 后直接效应消失",
             })
 
-        return sorted(hypos, key=lambda h: -h["confidence"])
+        result = sorted(hypos, key=lambda h: -h["confidence"])
+
+        # ── 元假说: 现有解释框架够吗? ──
+        coverage = sum(h["confidence"] for h in result[:3])
+        if coverage < 0.6:
+            # 超过 40% 的变异未被现有框架解释 → 生成新假说类型
+            residual = 1.0 - coverage
+            novel_pattern = self._analyze_residual(target_entity, sigs, residual)
+            h5 = {
+                "id": "H5",
+                "label": f"未知机制: {novel_pattern['description']}",
+                "mechanism": "未建模模式",
+                "detail": f"现有 H1-H4 仅解释 {coverage*100:.0f}%, 剩余 {residual*100:.0f}% 变异来自未知来源",
+                "confidence": round(residual * 0.5, 3),
+                "prediction": f"如果 H5 正确, 应观察到: {novel_pattern['describe_pattern']}",
+                "test": "探索性分析",
+                "discrimination": "区别于 H1-H4: 需要一个现有框架无法描述的新机制",
+                "meta": True,
+            }
+            result.append(h5)
+
+        return result
+
+    def _analyze_residual(self, entity, sigs, residual) -> dict:
+        """
+        分析未解释的残差, 提取可能的模式。
+        这是"发现第四种机制"的核心——不是从固定类型选, 而是从数据残差中推断新类型。
+        """
+        target_sig = sigs.get(entity, set())
+        incoming = sum(1 for p, _ in target_sig if p.startswith("←"))
+        outgoing = len(target_sig) - incoming
+
+        if incoming == 0 and outgoing == 0:
+            return {
+                "description": f"{entity} 与图谱完全孤立, 可能属于一个未建模的子图",
+                "describe_pattern": f"{entity} 连接到当前图谱之外的新区域",
+            }
+        elif incoming > outgoing * 2:
+            return {
+                "description": f"{entity} 主要是被动方 (入度 {incoming} >> 出度 {outgoing}), 可能受未观测的全局因素影响",
+                "describe_pattern": f"{entity} 的行为由外部隐变量驱动, 而非图内关系",
+            }
+        elif outgoing > incoming * 2:
+            return {
+                "description": f"{entity} 主要是主动方 (出度 {outgoing} >> 入度 {incoming}), 可能是一个未观测的因果源",
+                "describe_pattern": f"{entity} 可能是未建模的底层原因, 通过未知路径影响图中其他节点",
+            }
+        else:
+            return {
+                "description": f"{entity} 的残差没有明显的结构特征, 需要更多数据来辨识新机制",
+                "describe_pattern": f"增加多样化数据以揭示当前框架无法捕捉的模式",
+            }
+
+        return sorted(result, key=lambda h: -h["confidence"])
 
     def _find_analogies(self, entity, sigs, existing_preds, n=3) -> list[dict]:
         results = []
