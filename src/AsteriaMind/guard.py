@@ -27,7 +27,7 @@ import logging
 from typing import List
 from collections import deque
 
-logger = logging.getLogger("hivemind_v2.guard")
+logger = logging.getLogger("AsteriaMind.guard")
 
 # ── 绝对不变量 ──
 INVARIANTS = {

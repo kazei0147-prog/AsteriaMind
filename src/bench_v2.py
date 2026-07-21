@@ -1,10 +1,10 @@
 """HiveMind 2.0 CO2 基准测试"""
 import sys, csv
 sys.path.insert(0, 'D:/AM/HiveMind_repo/src')
-from hivemind_v2.learner import Learner
-from hivemind_v2.argument import ArgumentEvaluator
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.validator import CrossValidator
+from AsteriaMind.learner import Learner
+from AsteriaMind.argument import ArgumentEvaluator
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.validator import CrossValidator
 
 reader = csv.DictReader(open('D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
 data = [float(r['value']) for r in reader]

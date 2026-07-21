@@ -4,8 +4,8 @@ v2.9 集成测试: 四层自主探索管道接入 orchestrator
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
-from hivemind_v2.orchestrator import HiveMindV2
-from hivemind_v2.portal import Portal, LiveSource, ConsoleSink, CuriosityEngine
+from AsteriaMind.orchestrator import HiveMindV2
+from AsteriaMind.portal import Portal, LiveSource, ConsoleSink, CuriosityEngine
 
 random.seed(42)
 live = LiveSource(max_buffer=50)

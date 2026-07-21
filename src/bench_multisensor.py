@@ -1,9 +1,9 @@
 """HM 2.0 多传感器故障容错 — 验证信任系统能否识别故障传感器"""
 import sys, csv, random
 sys.path.insert(0, 'D:/AM/HiveMind_repo/src')
-from hivemind_v2.learner import Learner
-from hivemind_v2.argument import ArgumentEvaluator
-from hivemind_v2.trust import TrustEngine
+from AsteriaMind.learner import Learner
+from AsteriaMind.argument import ArgumentEvaluator
+from AsteriaMind.trust import TrustEngine
 
 reader = csv.DictReader(open('D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
 truth = [float(r['value']) for r in reader]

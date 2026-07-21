@@ -6,7 +6,7 @@ Test 1 vFinal: Proposal Diversity — 强制差异化验证
 """
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
-from hivemind_v2.learner import Learner
+from AsteriaMind.learner import Learner
 
 random.seed(42)
 

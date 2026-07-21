@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional
 from .learner import Learner
 
-logger = logging.getLogger("hivemind_v2.dream")
+logger = logging.getLogger("AsteriaMind.dream")
 
 
 class DreamStore:

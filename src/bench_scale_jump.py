@@ -1,7 +1,7 @@
 """尺度跳变测试: 10 → 500"""
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
-from hivemind_v2.learner import Learner, BayesianBelief
+from AsteriaMind.learner import Learner, BayesianBelief
 
 random.seed(42)
 l_new = Learner("v2.6", initial_mu=0, initial_sigma=10, window_size=5,

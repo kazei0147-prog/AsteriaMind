@@ -12,7 +12,7 @@ import threading
 import time
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
-from hivemind_v2.portal import LiveSource, Portal, ConsoleSink, CuriosityEngine
+from AsteriaMind.portal import LiveSource, Portal, ConsoleSink, CuriosityEngine
 
 
 class WebSearchFeeder:

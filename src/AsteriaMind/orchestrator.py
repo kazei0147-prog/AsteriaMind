@@ -18,7 +18,7 @@ from .guard import StabilityGuard
 from .portal import Portal, Emission, CuriosityEngine
 from .budget_contest import BudgetContest, ExplorationProposal
 
-logger = logging.getLogger("hivemind_v2.orchestrator")
+logger = logging.getLogger("AsteriaMind.orchestrator")
 
 
 PRESET_PERSONAS = [

@@ -14,10 +14,10 @@ sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
 import csv
 import random
-from hivemind_v2.learner import Learner
-from hivemind_v2.argument import ArgumentEvaluator
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.guard import StabilityGuard
+from AsteriaMind.learner import Learner
+from AsteriaMind.argument import ArgumentEvaluator
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.guard import StabilityGuard
 
 random.seed(42)
 

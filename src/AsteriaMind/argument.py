@@ -15,7 +15,7 @@ import logging
 from typing import List, Optional, Tuple
 from .learner import ReasoningChain
 
-logger = logging.getLogger("hivemind_v2.argument")
+logger = logging.getLogger("AsteriaMind.argument")
 
 
 class ArgumentEvaluator:

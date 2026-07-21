@@ -9,7 +9,7 @@ Test 2: BudgetContest — 竞标机制验证
 """
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
-from hivemind_v2.budget_contest import BudgetContest, ExplorationProposal
+from AsteriaMind.budget_contest import BudgetContest, ExplorationProposal
 
 random.seed(123)
 

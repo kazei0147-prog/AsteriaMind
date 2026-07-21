@@ -1,9 +1,9 @@
 """v2.1 梦境 + 个性 Benchmark"""
 import sys, csv, json, time, os
 sys.path.insert(0, 'D:/AM/HiveMind_repo/src')
-from hivemind_v2.learner import Learner
-from hivemind_v2.dream import DreamStore
-from hivemind_v2.orchestrator import PRESET_PERSONAS
+from AsteriaMind.learner import Learner
+from AsteriaMind.dream import DreamStore
+from AsteriaMind.orchestrator import PRESET_PERSONAS
 
 reader = csv.DictReader(open('D:/AM/HiveMind_repo/experiments/data/co2_mauna_loa.csv'))
 data = [float(r['value']) for r in reader]
@@ -58,8 +58,8 @@ print("测试3: 冷启动 vs 热启动 (后200轮CO2)")
 print("=" * 60)
 
 # 冷启动
-from hivemind_v2.argument import ArgumentEvaluator
-from hivemind_v2.trust import TrustEngine
+from AsteriaMind.argument import ArgumentEvaluator
+from AsteriaMind.trust import TrustEngine
 
 cold_learners = [
     Learner(name=f"C{i}", window_size=7, initial_mu=0, initial_sigma=10)

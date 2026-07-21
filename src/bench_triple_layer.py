@@ -8,11 +8,11 @@ B: 胜者获得搜索权 → 得到新数据 → 学习
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
-from hivemind_v2.learner import Learner
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.mother import MotherMind
-from hivemind_v2.portal import Portal, LiveSource, ConsoleSink, CuriosityEngine
-from hivemind_v2.budget_contest import BudgetContest, ExplorationProposal
+from AsteriaMind.learner import Learner
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.mother import MotherMind
+from AsteriaMind.portal import Portal, LiveSource, ConsoleSink, CuriosityEngine
+from AsteriaMind.budget_contest import BudgetContest, ExplorationProposal
 
 random.seed(42)
 

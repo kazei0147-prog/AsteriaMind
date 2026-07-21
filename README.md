@@ -339,7 +339,7 @@ v2.x (当前):
 
 ## 六·五、HiveMind 2.0 alpha（实验性新架构）
 
-> ⚠️ 实验性分支，与 v0.6 主架构（`src/hivemind/`）**并存、不替代**。代码在 [`src/hivemind_v2/`](src/hivemind_v2/)。
+> ⚠️ 实验性分支，与 v0.6 主架构（`src/hivemind/`）**并存、不替代**。代码在 [`src/AsteriaMind/`](src/AsteriaMind/)。
 
 v0.6 在真实数据上暴露的根本问题（共识被漂移/污染数据绑架），促成了一次共识机制的彻底重构：
 

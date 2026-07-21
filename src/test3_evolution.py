@@ -9,9 +9,9 @@ Test 3: 长期演化测试 — 500轮后系统是否依然多样性
 """
 import sys, csv, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
-from hivemind_v2.learner import Learner
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.budget_contest import BudgetContest, ExplorationProposal
+from AsteriaMind.learner import Learner
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.budget_contest import BudgetContest, ExplorationProposal
 
 random.seed(42)
 

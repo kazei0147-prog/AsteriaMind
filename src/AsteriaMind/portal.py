@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass, field
 
-logger = logging.getLogger("hivemind_v2.portal")
+logger = logging.getLogger("AsteriaMind.portal")
 
 
 # ──────────── 数据源抽象 ────────────

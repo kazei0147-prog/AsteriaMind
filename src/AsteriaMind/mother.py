@@ -16,7 +16,7 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from collections import deque
 
-logger = logging.getLogger("hivemind_v2.orchestrator")
+logger = logging.getLogger("AsteriaMind.orchestrator")
 
 
 class Decision:

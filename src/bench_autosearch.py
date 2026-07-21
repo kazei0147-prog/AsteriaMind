@@ -10,11 +10,11 @@
 import sys, time
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
-from hivemind_v2.learner import Learner
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.mother import MotherMind
-from hivemind_v2.guard import StabilityGuard
-from hivemind_v2.portal import (
+from AsteriaMind.learner import Learner
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.mother import MotherMind
+from AsteriaMind.guard import StabilityGuard
+from AsteriaMind.portal import (
     Portal, LiveSource, SearchDataSource, ConsoleSink, CuriosityEngine
 )
 

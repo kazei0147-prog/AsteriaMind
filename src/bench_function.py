@@ -6,11 +6,11 @@ v2.8 FunctionLearner 验证: 学习 y=2x+5 + 结构断层检测
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
 
-from hivemind_v2.function_learner import FunctionLearner
-from hivemind_v2.learner import Learner
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.mother import MotherMind
-from hivemind_v2.portal import Portal, LiveSource, ConsoleSink, CuriosityEngine
+from AsteriaMind.function_learner import FunctionLearner
+from AsteriaMind.learner import Learner
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.mother import MotherMind
+from AsteriaMind.portal import Portal, LiveSource, ConsoleSink, CuriosityEngine
 
 random.seed(42)
 

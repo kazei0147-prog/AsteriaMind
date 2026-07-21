@@ -13,7 +13,7 @@ v2.10 自适应阈值 (思路 A + B):
 import logging
 from typing import List, Dict
 
-logger = logging.getLogger("hivemind_v2.trust")
+logger = logging.getLogger("AsteriaMind.trust")
 
 
 class TrustEngine:

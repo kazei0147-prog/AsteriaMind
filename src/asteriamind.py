@@ -19,21 +19,21 @@ import cmd, math, random, sys, os
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 
-from hivemind_v2.knowledge import KnowledgeGraph
-from hivemind_v2.world_model import WorldModel
-from hivemind_v2.meta_learner import MetaLearner, BasisSet
-from hivemind_v2.poly_learner import PolyLearner
-from hivemind_v2.diagnosis import DiagnosticEngine, ExperimentDesigner
-from hivemind_v2.tool_registry import ToolRegistry, Tool, orchestrate
-from hivemind_v2.mother_adapter import MotherAdapter
-from hivemind_v2.learner import Learner
-from hivemind_v2.trust import TrustEngine
-from hivemind_v2.mother import MotherMind
-from hivemind_v2.argument import ArgumentEvaluator
-from hivemind_v2.validator import CrossValidator
-from hivemind_v2.portal import CuriosityEngine
-from hivemind_v2.exploration_reward import DelayedVerificationQueue, ExplorationReward
-from hivemind_v2.datasource import LibrarySource, DataPipeline
+from AsteriaMind.knowledge import KnowledgeGraph
+from AsteriaMind.world_model import WorldModel
+from AsteriaMind.meta_learner import MetaLearner, BasisSet
+from AsteriaMind.poly_learner import PolyLearner
+from AsteriaMind.diagnosis import DiagnosticEngine, ExperimentDesigner
+from AsteriaMind.tool_registry import ToolRegistry, Tool, orchestrate
+from AsteriaMind.mother_adapter import MotherAdapter
+from AsteriaMind.learner import Learner
+from AsteriaMind.trust import TrustEngine
+from AsteriaMind.mother import MotherMind
+from AsteriaMind.argument import ArgumentEvaluator
+from AsteriaMind.validator import CrossValidator
+from AsteriaMind.portal import CuriosityEngine
+from AsteriaMind.exploration_reward import DelayedVerificationQueue, ExplorationReward
+from AsteriaMind.datasource import LibrarySource, DataPipeline
 
 random.seed(42)
 

@@ -3,7 +3,7 @@ v2.8 实战: 学习 y=2x+5, 然后计算 x=1000 时的 y
 """
 import sys, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
-from hivemind_v2.function_learner import FunctionLearner
+from AsteriaMind.function_learner import FunctionLearner
 
 random.seed(42)
 fl = FunctionLearner(dim=2, forgetting=0.995)

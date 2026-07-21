@@ -8,8 +8,8 @@ Test 4: 干扰测试 — 传感器故障后系统行为
 """
 import sys, csv, random
 sys.path.insert(0, "D:/AM/HiveMind_repo/src")
-from hivemind_v2.learner import Learner
-from hivemind_v2.budget_contest import BudgetContest, ExplorationProposal
+from AsteriaMind.learner import Learner
+from AsteriaMind.budget_contest import BudgetContest, ExplorationProposal
 
 random.seed(42)
 
