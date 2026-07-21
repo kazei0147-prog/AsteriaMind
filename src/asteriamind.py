@@ -234,6 +234,156 @@ class AsteriaShell(cmd.Cmd):
         else:
             print("  格式: upload x=5.2 y=42.3")
 
+    def do_explore(self, arg):
+        """自主提问 → 实验 → 闭环: explore"""
+        print("\n════════════════════════════════════════════")
+        print("🔬 AM 自主探索 — 完整闭环")
+        print("════════════════════════════════════════════")
+
+        # ── Step 1: 发现知识缺口 ──
+        uncertain = kg.most_uncertain(5)
+        if not uncertain:
+            # 如果图是空的, 先喂一些基础数据
+            print("\n  ⚠️  知识图谱是空的。先用世界模型喂数据建立基础认知...")
+            def world(x):
+                return 30 * math.sin(x / 5) + 2 * x + random.gauss(0, 3)
+
+            for _ in range(60):
+                x = random.uniform(0, 25)
+                y = world(x)
+                step(x, y)
+            basis_name = meta.current.basis.name
+            r2 = meta.current.r_squared
+            kg.add("当前数据", "BEST_FIT_BY", basis_name, confidence=min(1.0, r2), source="observed")
+            kg.add("当前数据", "PREDICTS", f"适合{basis_name}", confidence=min(1.0, r2), source="observed")
+            print(f"  ✅ 基础认知建立: 数据似乎适合 {basis_name} (R²={r2:.3f})")
+            uncertain = kg.most_uncertain(5)
+
+        if not uncertain:
+            print("  ❌ 仍然没有可探索的知识。")
+            return
+
+        target = uncertain[0]
+        print(f"""
+  🔍 步骤 1: 发现知识缺口
+    最不确定的知识: {target.key()}
+    当前置信度: {target.confidence:.2f}
+    信念: α={target.belief.alpha:.1f} β={target.belief.beta:.1f}
+""")
+
+        # ── Step 2: 生成假说 ──
+        if target.predicate == "PREDICTS":
+            question = f"在什么条件下 {target.subject} 会导致 {target.object}？"
+            hypo = f"假说: {target.subject} 总导致 {target.object}"
+            alt = f"反假说: {target.subject} 不一定导致 {target.object}"
+        elif target.predicate == "CAUSES":
+            question = f"为什么 {target.subject} 会导致 {target.object}？"
+            hypo = f"假说: {target.subject} 直接导致 {target.object}"
+            alt = f"反假说: {target.subject} 和 {target.object} 只是相关性"
+        elif target.predicate == "BEST_FIT_BY":
+            question = f"数据是否真的最适合 {target.object}？"
+            hypo = f"假说: 当前数据最适合 {target.object}"
+            alt = f"反假说: 换一种基函数可能更好"
+        else:
+            question = f"{target.key()} 是否成立？"
+            hypo = f"假说: {target.key()} 成立"
+            alt = f"反假说: {target.key()} 不成立"
+
+        print(f"""  ❓ 步骤 2: 生成问题
+    "{question}"
+    {hypo}
+    {alt}
+""")
+
+        # ── Step 3: 设计实验 ──
+        print(f"  🧪 步骤 3: 设计实验")
+        if "BEST_FIT" in target.predicate or "基函数" in question:
+            # 结构实验: 在更多点采样, 比较三个基的 R²
+            n_sample = 20
+            xs = [random.uniform(0, 25) for _ in range(n_sample)]
+            strategy = "全域采样, 比较基函数 R²"
+        elif target.predicate in ("PREDICTS", "CAUSES"):
+            # 因果实验: 观察 subject 出现时 object 是否也出现
+            n_sample = 15
+            xs = [random.uniform(0, 25) for _ in range(n_sample)]
+            strategy = f"观测 {n_sample} 个数据点, 验证因果关系"
+        else:
+            n_sample = 10
+            xs = [random.uniform(0, 25) for _ in range(n_sample)]
+            strategy = "随机采样验证"
+
+        print(f"    策略: {strategy} ×{n_sample}")
+        print(f"    采样 {n_sample} 个点...")
+
+        # ── Step 4: 执行实验 ──
+        pre_bases = {l.basis.name: l.r_squared for l in meta.learners}
+        pre_confidence = target.confidence
+
+        def world(x):
+            return 30 * math.sin(x / 5) + 2 * x + random.gauss(0, 3)
+
+        correct_count = 0
+        for sx in xs:
+            sy = world(sx)
+            step(sx, sy)
+
+            # 验证: 如果是结构型, 看最优基是否匹配
+            if "BEST_FIT" in target.predicate:
+                if meta.current.basis.name == target.object:
+                    correct_count += 1
+
+        # ── Step 5: 分析结果 ──
+        post_confidence = target.confidence
+        post_bases = {l.basis.name: l.r_squared for l in meta.learners}
+
+        if "BEST_FIT" in target.predicate or "基函数" in question:
+            # 结构验证
+            accuracy = correct_count / n_sample
+            if accuracy > 0.6:
+                kg.observe(target.subject, target.predicate, target.object, correct=True, weight=1.0)
+                verdict = f"✅ 假说成立! {n_sample} 个采样点 {correct_count}/{n_sample} 确认。"
+            else:
+                best_basis = max(post_bases, key=post_bases.get)
+                kg.observe(target.subject, target.predicate, target.object, correct=False,
+                           weight=0.5, context=f"实际最优是{best_basis}",
+                           alternative=f"更适合{best_basis}")
+                verdict = f"❌ 假说被推翻! 实际最优基是 {best_basis}。"
+        else:
+            # 因果/关系验证
+            accuracy = correct_count / max(1, n_sample)
+            kg.observe(target.subject, target.predicate, target.object, correct=(accuracy > 0.5),
+                       weight=1.0)
+            verdict = f"{'✅' if accuracy>0.5 else '❌'} 实验完成 ({correct_count}/{n_sample} 支持)"
+
+        post_confidence = target.confidence
+        delta = post_confidence - pre_confidence
+
+        print(f"""
+  📊 步骤 4+5: 结果分析
+    {verdict}
+    置信度: {pre_confidence:.2f} → {post_confidence:.2f} ({delta:+.2f})
+    信念: α={target.belief.alpha:.1f} β={target.belief.beta:.1f}
+    {'← 更坚定了' if delta > 0.01 else '← 动摇了' if delta < -0.01 else '← 没变化'}
+""")
+
+        # ── 步骤 6: 反思 ──
+        print(f"  🧠 步骤 6: 反思与归档")
+        if delta > 0.02:
+            insight = f"对\"{target.key()}\"的信念更坚定了。这条知识被实验证实, 可以作为稳定推断的基础。"
+        elif delta < -0.02:
+            insight = f"对\"{target.key()}\"的信念被削弱了。应该考虑替代解释, 可能需要学习新知识。"
+            kg.add(target.subject, "MIGHT_NOT_BE", target.object,
+                   confidence=abs(delta), source="inferred")
+        else:
+            insight = f"实验没有显著改变信念。需要更多数据或更精准的实验设计。"
+
+        print(f"    💡 {insight}")
+        print(f"════════════════════════════════════════════\n")
+
+        # 显示更新后的知识图谱
+        print("  更新后的知识图谱:")
+        print(kg.dump())
+
     def do_help(self, arg):
         print("""
 命令:
@@ -241,7 +391,8 @@ class AsteriaShell(cmd.Cmd):
   learn S P O [C]     教她: learn 春天 CAUSES 花粉过敏 0.8
   ask <问题>          查询: ask 春天 CAUSES 什么?
   predict             基于知识预测
-  verify <正确|错误>   验证上次预测
+  verify <现实值>      验证上次预测
+  explore             自主提问→实验→闭环 (核心!)
   mother              MotherMind 在想什么
   knowledge           知识图谱全览
   run <N>             自主运行 N 轮
