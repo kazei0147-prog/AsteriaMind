@@ -33,7 +33,7 @@ from AsteriaMind.argument import ArgumentEvaluator
 from AsteriaMind.validator import CrossValidator
 from AsteriaMind.portal import CuriosityEngine
 from AsteriaMind.exploration_reward import DelayedVerificationQueue, ExplorationReward
-from AsteriaMind.datasource import LibrarySource, DataPipeline
+from AsteriaMind.datasource import LibrarySource, DataPipeline, TextIngestor, KnowledgeAssimilator
 
 random.seed(42)
 
@@ -52,6 +52,8 @@ reward_queue = DelayedVerificationQueue(delay_rounds=10)
 # 外部世界
 library = LibrarySource()
 pipeline = DataPipeline(kg, library)
+ingestor = TextIngestor()
+assimilator = KnowledgeAssimilator(kg, pipeline)
 
 # 预填充知识库 (AM 可以自己查)
 library.add_fact("物体A", "HAS", "属性X", 0.9)
@@ -280,6 +282,39 @@ class AsteriaShell(cmd.Cmd):
                 print(f"      {pred} → {obj} ({conf})")
             if len(facts) > 3:
                 print(f"      ...等 {len(facts)} 条")
+
+    def do_read(self, arg):
+        """阅读文本并同化: read <文本> [来源] [可信度]"""
+        parts = arg.split("|")
+        text = parts[0].strip()
+        source = parts[1].strip() if len(parts) > 1 else "user"
+        credibility = float(parts[2].strip()) if len(parts) > 2 else 0.5
+
+        if not text:
+            print("  用法: read <文本> | <来源> | <可信度>")
+            return
+
+        # Step 1: 提取主张
+        claims = ingestor.ingest(text, source_name=source,
+                                 source_credibility=credibility)
+        print(f"\n  📖 从文本中提取了 {len(claims)} 条主张 (来源: {source}, 可信度: {credibility}):")
+        for c in claims:
+            print(f"    · {c.subject} {c.predicate} {c.object}")
+
+        if not claims:
+            print("  ⚠️ 未识别出可用的主张。尝试更直接的表述。")
+            return
+
+        # Step 2: 同化
+        print(f"\n  🧠 同化中 (与已有 {len(kg.relations)} 条知识碰撞)...")
+        result = assimilator.assimilate(claims)
+
+        # Step 3: 报告
+        print(f"  ✅ 接受: {result['accepted']}   ⚡ 冲突: {result['conflicted']}   ❌ 拒绝: {result['rejected']}")
+        for d in result["details"]:
+            icon = {"accepted": "✅", "reinforced": "⬆️", "conflicted": "⚡", "rejected": "❌"}.get(d["action"], "?")
+            print(f"    {icon} [{d['action']}] {d['claim'][:60]}")
+            print(f"       {d['reason']}")
 
     def do_explore(self, arg):
         """自主闭环: 知识图谱自己产生目标→假说→实验→解释"""
