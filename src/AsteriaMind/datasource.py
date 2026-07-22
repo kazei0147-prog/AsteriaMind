@@ -212,6 +212,8 @@ class TextIngestor:
     # 关系词映射: 文本中常见的动词 → KG 中的 predicate
     RELATION_PATTERNS = [
         ("导致|引起|造成|引发|促使", "CAUSES"),
+        ("增加|提高|增强|提升|升高", "INCREASES"),
+        ("降低|减少|减弱|抑制|减轻", "DECREASES"),
         ("属于|是一种|是.*的一种|归类为", "IS_A"),
         ("具有|拥有|带有|包含|含有", "HAS"),
         ("预测|预示|预兆|意味着|意味", "PREDICTS"),
@@ -240,34 +242,52 @@ class TextIngestor:
             if len(sent) < 4:
                 continue
 
-            for pattern, predicate in self._compiled:
-                m = pattern.search(sent)
-                if m:
-                    # 主语: 动词前面的部分
-                    subject = sent[:m.start()].strip()
-                    # 宾语: 动词后面的部分
-                    obj = sent[m.end():].strip()
+            # 按逗号/分号拆分成子句 (每段可能独立主张)
+            clauses = [sent]
+            if any(c in sent for c in '，,；;'):
+                clauses = re.split(r'[，,；;]', sent)
 
-                    # 清理
-                    subject = re.sub(r'^(的|了|已经|正在|可以|可能|应该|会|将|不|没|没有)\s*', '', subject)
-                    obj = re.sub(r'^(的|了|已经|正在|可以|可能|应该|会|将)\s*', '', obj)
+            first_subject = ""
+            for ci, clause in enumerate(clauses):
+                clause = clause.strip()
+                if len(clause) < 3:
+                    continue
 
-                    if subject and obj and len(subject) < 50 and len(obj) < 50:
-                        # 否定处理
-                        neg_match = re.search(r'(不|没|没有|非|并非)\s*', sent[:m.start()])
-                        if neg_match:
-                            predicate = "NOT_" + predicate
-                            # 从主语中移除否定词
-                            subject = re.sub(r'(不|没|没有|非|并非)\s*$', '', subject).strip()
+                # 共享主语: 后续子句开头是连接词, 继承主语
+                if ci > 0 and first_subject:
+                    leader = re.match(r'^(但|而|且|并且|也|可能|会|可以|还|同时|不过)\s*', clause)
+                    if leader:
+                        clause = first_subject + clause[leader.end():]
 
-                        claims.append(Claim(
-                            subject=subject, predicate=predicate, object=obj,
-                            raw_text=sent,
-                            source_name=source_name,
-                            source_credibility=source_credibility,
-                            claim_confidence=source_credibility * 0.3,  # 初始最大 0.3
-                        ))
-                        break  # 一句话只匹配第一个模式
+                for pattern, predicate in self._compiled:
+                    m = pattern.search(clause)
+                    if m:
+                        subject = clause[:m.start()].strip()
+                        obj = clause[m.end():].strip()
+
+                        # 清理前缀和后缀
+                        subject = re.sub(r'^(的|了|已经|正在|可以|可能|应该|会|将|不|没|没有)\s*', '', subject)
+                        subject = re.sub(r'\s*(的|了|会|可能|可以|应该|将)$', '', subject)
+                        obj = re.sub(r'^(的|了|已经|正在|可以|可能|应该|会|将)\s*', '', obj)
+
+                        if subject and obj and len(subject) < 50 and len(obj) < 50:
+                            if not first_subject:
+                                first_subject = subject
+
+                            # 否定处理
+                            neg_match = re.search(r'(不|没|没有|非|并非)\s*', clause[:m.start()])
+                            if neg_match:
+                                predicate = "NOT_" + predicate
+                                subject = re.sub(r'(不|没|没有|非|并非)\s*$', '', subject).strip()
+
+                            claims.append(Claim(
+                                subject=subject, predicate=predicate, object=obj,
+                                raw_text=clause,
+                                source_name=source_name,
+                                source_credibility=source_credibility,
+                                claim_confidence=source_credibility * 0.3,
+                            ))
+                            break
 
         return claims
 
