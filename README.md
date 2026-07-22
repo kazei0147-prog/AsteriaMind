@@ -121,3 +121,11 @@ provenance 咖啡--[CAUSES]-->清醒
 旧的 HiveMind v0.6 (能量经济 + 多模块加权平均) 代码保留在 `src/hivemind/`, 失败复盘见 `docs/WHY_HIVEMIND_FAILED.md`.
 
 GitHub: https://github.com/kazei0147-prog/AsteriaMind
+
+---
+
+## 历史存档
+
+v3.1 版本的完整 README (含多模块架构细节、v0.x 设计哲学、HiveMind 2.0 复盘) 保存在 [assets/README_v3.1_archive.md](assets/README_v3.1_archive.md)。
+
+*一路走来，每一步都算数。*
