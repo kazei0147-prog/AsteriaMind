@@ -52,6 +52,7 @@ from AsteriaMind.knowledge_request import (
 from AsteriaMind.math_reasoner import MathReasoner
 from AsteriaMind.skill_library import SkillLibrary, build_default_skills
 from AsteriaMind.command_tool import CommandTool
+from AsteriaMind.active_learner import ActiveLearner
 
 random.seed(42)
 
@@ -92,6 +93,7 @@ kae = KnowledgeAcquisitionExecutor(knowledge_queue, web_search, kg, vl)
 math_engine = MathReasoner()
 skill_lib = build_default_skills()
 ctool = CommandTool()
+learner = ActiveLearner(kg, vl, web_search, ctool)
 
 # 注册数学推理为假说模板
 tmpl_registry.register(HypothesisTemplate(
@@ -597,6 +599,49 @@ class AsteriaShell(cmd.Cmd):
                 print(f"     {line}")
         if result.stderr:
             print(f"     ⚠ {result.stderr[:100]}")
+
+    def do_learnw(self, arg):
+        """学习一个词: learnw <词>"""
+        word = arg.strip()
+        if not word:
+            print("  用法: learnw <词>")
+            return
+        r = learner.learn_word(word)
+        if r["known"]:
+            print(f"  ✅ 认识: {word} → {r['definition'][:60]} (来源:{r['source']})")
+        elif r.get("pending"):
+            print(f"  ❓ 不认识: {word} → 已加入提问队列")
+        else:
+            print(f"  ❓ {word}: {r.get('note', '未找到')}")
+
+    def do_readcn(self, arg):
+        """从中文文本学习: readcn <文本>"""
+        text = arg.strip()
+        if not text:
+            print("  用法: readcn <文本>")
+            return
+        r = learner.learn_from_text(text)
+        print(f"  📖 阅读 {r['total_words']} 词，{r['unique']} 个不同词")
+        if r["unknown"] > 0:
+            print(f"  ❓ 不认识 {r['unknown']} 个词: {', '.join(r['pending_questions'][:10])}")
+            print(f"  使用 questions 查看全部, answer <词> <解释> 回答")
+
+    def do_questions(self, arg):
+        """查看待回答问题: questions"""
+        qs = learner.get_questions(10)
+        if not qs:
+            print("  ✅ 没有问题待回答")
+        for i, q in enumerate(qs):
+            print(f"  {i+1}. {q.get('word', q.get('question','?'))}: {q['context'][:60]}")
+
+    def do_answer(self, arg):
+        """回答问题: answer <词> <解释>"""
+        parts = arg.split(None, 1)
+        if len(parts) < 2:
+            print("  用法: answer <词> <解释>")
+            return
+        r = learner.answer_question(parts[0], parts[1])
+        print(f"  ✅ 已学会: {r['learned']} → {r['answer'][:40]}")
 
     def do_env(self, arg):
         """检查环境: env"""
