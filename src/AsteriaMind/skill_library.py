@@ -139,7 +139,7 @@ def build_default_skills() -> SkillLibrary:
     def math_handler(query, kg=None):
         from AsteriaMind.math_reasoner import MathReasoner
         mr = MathReasoner()
-        result = mr.solve(query)
+        result = mr.solve(query, kg=kg)
         if result:
             if kg:
                 kg.add(query.strip(), "EQUALS", str(result.result),

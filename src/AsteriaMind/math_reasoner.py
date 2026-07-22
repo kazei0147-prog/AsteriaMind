@@ -33,27 +33,50 @@ class MathReasoner:
       → 可被反证挑战 (比如用户说"算错了")
     """
 
-    def solve(self, query: str) -> Optional[MathResult]:
-        """解析并求解。先算 → 再验证 → 失败则降置信度。"""
+    def solve(self, query: str, kg=None) -> Optional[MathResult]:
+        """解析 → 计算 → 验证 → 失败则降置信度 + 发采购单重试"""
+
+        # ── reuse existing knowledge ──
+        if kg:
+            for r in kg.relations:
+                if r.subject == query.strip() and r.predicate == "EQUALS":
+                    print(f"  📖 从 KG 调取已知结果: {r.object} (置信度 {r.confidence:.2f})")
+                    return MathResult(expression=query, result=float(r.object),
+                                     steps=[f"已知: {r.object}"], confidence=r.confidence)
+
         q = query.strip()
         result = None
-
         for method in [self._derivative, self._integral, self._limit,
-                       self._arithmetic, self._algebra, self._pattern,
+                       self._algebra, self._arithmetic, self._pattern,
                        self._convert, self._sqrt, self._power]:
             r = method(q)
             if r:
                 result = r
                 break
-
         if result is None:
             return None
 
-        # ── 验证: 把结果带回原方程 ──
+        # ── 验证 ──
         v = self._verify(q, result)
         if v["failed"]:
             result.confidence -= v["penalty"]
             result.steps.append(f"⚠ 验证失败: {v['reason']}")
+
+            # 置信度过低 → 发知识采购单, 标记需要重试
+            if result.confidence < 0.5 and kg:
+                try:
+                    from AsteriaMind.knowledge_request import KnowledgeRequest
+                    request = KnowledgeRequest(
+                        query=query, urgency=0.8,
+                        context=f"验证失败: {v['reason']}. 置信度降至 {result.confidence:.2f}，需要外部验证或不同解法",
+                        constraints=["需可证伪", "需来源可追溯", "优先数学权威来源"],
+                        posted_by="math_self_verification",
+                    )
+                    result.steps.append("📡 已发知识采购单, 等待外部验证")
+                    return result
+                except ImportError:
+                    pass
+
         return result
 
     def _verify(self, q: str, result) -> dict:
