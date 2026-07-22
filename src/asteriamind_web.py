@@ -274,28 +274,57 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             # 其他元语句: 对话回复, 不强学
             return self._conversational_reply(text)
 
-        # ── 4. 问题——查 KG ──
-        if '?' in text or '？' in text or '吗' in text or text.startswith('什么') or text.startswith('谁'):
+        # ── 4. 问题——查 KG (在事实学习之前!) ──
+        if '?' in text or '？' in text or '吗' in text or '是什么' in text or '是谁' in text or text.startswith('什么') or text.startswith('谁'):
             return self._handle_question(text)
 
-        # ── 5. 事实陈述——只学有明确结构的 ──
-        # 必须有清晰 "X是Y" 或 "X Y" 的因果结构
+        # ── 5. 事实陈述——多句型解析 ──
+        # 句型1: "X是Y的Z" / "X是Y的" → X HAS_RELATION Z (related_to Y)
+        m = re.search(r'^([\u4e00-\u9fff\w]{1,10})是([\u4e00-\u9fff\w]{1,10})的([\u4e00-\u9fff\w]{1,10})[\u3002\.\?？!！]?$', text)
+        if m:
+            subj, owner, rel = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+            kg.add(subj, f"HAS_{rel.upper()}", owner, confidence=0.7)
+            db.add_relation(subj, f"HAS_{rel.upper()}", owner, 0.7, source="web")
+            _auto_export()
+            return (f"✅ 学会了: {subj} 的 {rel} 是 {owner}", "learn_possessive")
+
+        # 句型2: "X是Y" (简单 IS_A)
         m = re.search(r'^([\u4e00-\u9fff\w]{1,15})是([\u4e00-\u9fff\w]{1,20})[\u3002\.\?？!！]?$', text)
         if m:
             subj, obj = m.group(1).strip(), m.group(2).strip()
-            # 排除指示代词
-            if subj in ('这', '那', '这个', '那个', '它', '他', '她') or obj in ('什么', '谁'):
-                return self._conversational_reply(text)
+            if subj in ('这', '那', '这个', '那个', '它', '他', '她', '我', '你'): return self._conversational_reply(text)
             kg.add(subj, "IS_A", obj, confidence=0.7)
             db.add_relation(subj, "IS_A", obj, 0.7, source="web")
             _auto_export()
+            # 反向推理: 如果已经知道 A IS_A B, 且这条说 B IS_A C, 推出 A IS_A C
+            inferred = self._infer_transitive(subj, obj)
+            if inferred:
+                return (f"✅ 学会了: {subj} 是一种 {obj}\n🔗 推理: {inferred}", "learn_fact")
             return (f"✅ 学会了: {subj} 是一种 {obj}", "learn_fact")
 
+        # 句型3: "X围绕Y环绕" / "X围绕Y运行" — 非贪婪, 以"围绕"为分隔
+        m = re.search(r'^(.+?)(?:围绕|绕着|绕)(.+?)(?:环绕|运行|运动|转|转动)?[\u3002\.]?$', text)
+        if m:
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            kg.add(subj, "ORBITS", obj, confidence=0.7)
+            db.add_relation(subj, "ORBITS", obj, 0.7, source="web")
+            _auto_export()
+            return (f"✅ 学会了: {subj} 围绕 {obj} 运行", "learn_orbit")
+
+        # 句型4: "X属于Y" / "X是Y的一种"
+        m = re.search(r'^([\u4e00-\u9fff\w]{1,10})(?:属于|属于于)([\u4e00-\u9fff\w]{1,15})[\u3002\.]?$', text)
+        if m:
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            kg.add(subj, "BELONGS_TO", obj, confidence=0.7)
+            db.add_relation(subj, "BELONGS_TO", obj, 0.7, source="web")
+            _auto_export()
+            return (f"✅ 学会了: {subj} 属于 {obj}", "learn_belong")
+
+        # 句型5: "X会/能/导致Y"
         m = re.search(r'^([\u4e00-\u9fff\w]{1,15})(?:会|能|可以|导致|引起|产生)([\u4e00-\u9fff\w]{1,20})[\u3002\.\?？!！]?$', text)
         if m:
             subj, obj = m.group(1).strip(), m.group(2).strip()
-            if subj in ('这', '那', '这个', '那个', '它', '他', '她'):
-                return self._conversational_reply(text)
+            if subj in ('这', '那', '这个', '那个', '它', '他', '她'): return self._conversational_reply(text)
             kg.add(subj, "CAUSES", obj, confidence=0.6)
             db.add_relation(subj, "CAUSES", obj, 0.6, source="web")
             _auto_export()
@@ -317,8 +346,57 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         # 默认: 友好提示
         return (f"我记下了。但你能说得更具体吗? 比如 'X是Y' 或 'X会Y'", "casual")
 
+    def _infer_transitive(self, subj: str, obj: str) -> str:
+        """传递推理: 已知 A IS_A B, 刚学 B IS_A C → 推出 A IS_A C"""
+        # 查: 谁 IS_A subj? (即底层实体)
+        lower = []
+        for r in kg.relations:
+            if r.predicate == "IS_A" and r.object == subj:
+                lower.append(r)
+        for r in lower:
+            kg.add(r.subject, "IS_A", obj, confidence=min(0.7, r.confidence * 0.9))
+            db.add_relation(r.subject, "IS_A", obj, min(0.7, r.confidence * 0.9), source="inferred")
+            _auto_export()
+            return f"{r.subject} 也是一种 {obj} (因为 {r.subject} IS_A {subj} ∧ {subj} IS_A {obj})"
+        # 反向: 刚学 A IS_A B, 已知 B IS_A C → 推出 A IS_A C
+        for r in kg.relations:
+            if r.predicate == "IS_A" and r.subject == obj:
+                kg.add(subj, "IS_A", r.object, confidence=min(0.7, r.confidence * 0.9))
+                db.add_relation(subj, "IS_A", r.object, min(0.7, r.confidence * 0.9), source="inferred")
+                _auto_export()
+                return f"{subj} 也是一种 {r.object} (因为 {subj} IS_A {obj} ∧ {obj} IS_A {r.object})"
+        return ""
+
     def _handle_question(self, text: str) -> tuple[str, str]:
-        """问题处理"""
+        """问题处理——KG查询 + 传递推理"""
+        # 句型1: "X的Y是什么" (必须在 "X是什么" 之前!)
+        m = re.search(r'^(.{1,6})的(.{1,8})(?:是什么|是什么？|是什么\?|属于什么)', text)
+        if m:
+            entity, prop = m.group(1).strip(), m.group(2).strip()
+            found = kg.query(subject=entity)
+            if found:
+                lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})"
+                         for r in found[:5]]
+                # 推理: 如果 entity 有 ORBITS 关系, 且 "环绕" IS_A prop → 传递推理
+                if prop == "运动方式" or prop == "移动方式":
+                    orbit = [r for r in kg.relations if r.subject == entity and r.predicate == "ORBITS"]
+                    if orbit:
+                        motion_type = [r for r in kg.relations if r.subject == "环绕" and r.predicate == "IS_A"]
+                        if motion_type:
+                            lines.append(f"  🔗 推理: {entity} 的 {prop} 是 {motion_type[0].object} (因为 {entity} ORBITS {orbit[0].object} ∧ 环绕 IS_A {motion_type[0].object})")
+                return ("\n".join(lines), "kg_query")
+
+        # 句型2: "X是什么" / "X属于什么"
+        m = re.search(r'^([\u4e00-\u9fff\w]{1,15})(?:是什么|是什么？|是什么\?|属于什么|属于啥|是什么东西)', text)
+        if m:
+            subj = m.group(1).strip()
+            found = kg.query(subject=subj)
+            if found:
+                lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})"
+                         for r in found[:5]]
+                return (f"关于 '{subj}' 我知道:\n" + "\n".join(lines), "kg_query")
+
+        # 通用问题
         for kw in re.findall(r'[\u4e00-\u9fff\w]{2,}', text.replace("?", "").replace("？", "")):
             if kw in ("什么", "是什么", "吗", "可以", "怎么", "如何", "为什么"): continue
             found = kg.query(subject=kw)
@@ -326,7 +404,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})"
                          for r in found[:5]]
                 return (f"关于 '{kw}' 我知道:\n" + "\n".join(lines), "kg_query")
-        return (f"我不确定这个。试试告诉我: '{text[:6] if len(text) > 6 else text}' 是什么?", "unknown")
+        return (f"我不确定。试试告诉我: '{text[:6] if len(text)>6 else text}' 是什么?", "unknown")
 
 
 if __name__ == "__main__":

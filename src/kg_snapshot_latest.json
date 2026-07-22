@@ -1,66 +1,182 @@
 [
   {
-    "key": "咖啡--[CAUSES]-->清醒",
-    "subject": "咖啡",
-    "predicate": "CAUSES",
-    "object": "清醒",
+    "subject": "地球",
+    "predicate": "IS_A",
+    "object": "行星",
+    "alpha": 37.5,
+    "beta": 2.8437500000000004,
+    "confidence": 0.9295120061967467,
+    "source": "observed"
+  },
+  {
+    "subject": "太阳",
+    "predicate": "IS_A",
+    "object": "恒星",
+    "alpha": 16.5,
+    "beta": 1.7500000000000004,
+    "confidence": 0.9041095890410958,
+    "source": "observed"
+  },
+  {
+    "subject": "火星",
+    "predicate": "IS_A",
+    "object": "行星",
     "alpha": 9.0,
-    "beta": 2.5,
-    "confidence": 0.782608695652174,
-    "source": "observed",
-    "counter_evidence": [
-      {
-        "context": "反证实验第1轮 (预算:100)",
-        "alternative": "系统审计触发的反设场景验证",
-        "time": 1784710475.952402
-      },
-      {
-        "context": "反证实验第2轮 (预算:95)",
-        "alternative": "系统审计触发的反设场景验证",
-        "time": 1784710475.9524105
-      },
-      {
-        "context": "反证实验第3轮 (预算:90)",
-        "alternative": "系统审计触发的反设场景验证",
-        "time": 1784710475.9524164
-      }
-    ],
-    "last_verified": 1784710475.9524164
+    "beta": 0.9999999999999998,
+    "confidence": 0.9,
+    "source": "observed"
   },
   {
-    "key": "茶--[CAUSES]-->清醒",
-    "subject": "茶",
-    "predicate": "CAUSES",
-    "object": "清醒",
-    "alpha": 8.0,
-    "beta": 1.9999999999999996,
-    "confidence": 0.8,
-    "source": "observed",
-    "counter_evidence": [],
-    "last_verified": 1784710475.9513907
-  },
-  {
-    "key": "咖啡--[INCREASES]-->心率",
     "subject": "咖啡",
-    "predicate": "INCREASES",
-    "object": "心率",
+    "predicate": "IS_A",
+    "object": "一种饮料",
     "alpha": 7.0,
     "beta": 3.0000000000000004,
     "confidence": 0.7,
-    "source": "observed",
-    "counter_evidence": [],
-    "last_verified": 1784710475.9513965
+    "source": "observed"
   },
   {
-    "key": "运动--[DECREASES]-->血压",
-    "subject": "运动",
-    "predicate": "DECREASES",
-    "object": "血压",
-    "alpha": 8.0,
-    "beta": 1.9999999999999996,
-    "confidence": 0.8,
-    "source": "observed",
-    "counter_evidence": [],
-    "last_verified": 1784710475.9513988
+    "subject": "哈哈哈就",
+    "predicate": "IS_A",
+    "object": "高兴的一个语气词吧，如果有人哈哈哈就代表她很高兴",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "你就",
+    "predicate": "IS_A",
+    "object": "指自己",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "月亮",
+    "predicate": "IS_A",
+    "object": "小行星",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "环绕",
+    "predicate": "IS_A",
+    "object": "一种运动方式",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "环绕",
+    "predicate": "IS_A",
+    "object": "运动方式",
+    "alpha": 49.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.9423076923076923,
+    "source": "observed"
+  },
+  {
+    "subject": "地球围",
+    "predicate": "ORBITS",
+    "object": "月球",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "地球",
+    "predicate": "IS_A",
+    "object": "什么",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "地球的运动方式",
+    "predicate": "IS_A",
+    "object": "什么",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "地球围",
+    "predicate": "ORBITS",
+    "object": "月球环绕",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "地球",
+    "predicate": "ORBITS",
+    "object": "月球",
+    "alpha": 14.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.8235294117647058,
+    "source": "observed"
+  },
+  {
+    "subject": "你",
+    "predicate": "CAUSES",
+    "object": "试着学习如何和我聊天呢",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "你",
+    "predicate": "CAUSES",
+    "object": "试着搜索",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "你不",
+    "predicate": "CAUSES",
+    "object": "导致试着搜索",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "你",
+    "predicate": "CAUSES",
+    "object": "试试搜索",
+    "alpha": 12.0,
+    "beta": 4.0,
+    "confidence": 0.75,
+    "source": "observed"
+  },
+  {
+    "subject": "你不",
+    "predicate": "CAUSES",
+    "object": "你尝试搜索",
+    "alpha": 12.0,
+    "beta": 4.0,
+    "confidence": 0.75,
+    "source": "observed"
+  },
+  {
+    "subject": "水",
+    "predicate": "CAUSES",
+    "object": "灭火",
+    "alpha": 18.0,
+    "beta": 4.0,
+    "confidence": 0.8181818181818182,
+    "source": "observed"
   }
 ]
