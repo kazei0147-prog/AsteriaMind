@@ -46,6 +46,9 @@ from AsteriaMind.falsification import (
 from AsteriaMind.vector_layer import VectorLayer
 from AsteriaMind.human_review import HumanReviewInterface, ProvenanceGuard
 from AsteriaMind.cross_layer import CrossLayerBridge, QueryRouter
+from AsteriaMind.knowledge_request import (
+    KnowledgeRequestMonitor, KnowledgeAcquisitionExecutor, KnowledgeRequest,
+)
 
 random.seed(42)
 
@@ -77,8 +80,12 @@ governance = TheoryGovernance(tmpl_registry)
 auditor = CertaintyAudit()
 falsifier = FalsificationController()
 source_tracker = SourceAuthorityTracker()
+knowledge_queue: list[KnowledgeRequest] = []
 web_search = WebSearchInterface()
+krm = KnowledgeRequestMonitor(knowledge_queue)
+kae = None  # 在 vl 之后初始化
 vl = VectorLayer(dim=128)
+kae = KnowledgeAcquisitionExecutor(knowledge_queue, web_search, kg, vl)
 provenance = ProvenanceGuard()
 reviewer = HumanReviewInterface(kg, provenance)
 bridge = CrossLayerBridge(kg, vl)
@@ -269,26 +276,13 @@ class AsteriaShell(cmd.Cmd):
             while round_num < n:
                 round_num += 1
 
-                # ── 1. 自动选话题 + 搜索 + 同化 ──
+                # ── 1. 知识缺口监控 → 采购申请 → 执行 → 同化 ──
                 if round_num % 3 == 0 and kg.relations:
-                    uncertain = [r for r in kg.relations if r.confidence < 0.5]
-                    topic = uncertain[0].subject if uncertain else kg.relations[round_num % len(kg.relations)].subject
-                    results = web_search.search(topic, max_results=2)
-                    new_claims = 0
-                    for r in results:
-                        if r.snippet and "未连接" not in r.snippet:
-                            pipe = __import__('AsteriaMind.text_pipeline', fromlist=['TextPipelineFull'])
-                            tp = pipe.TextPipelineFull(kg)
-                            result = tp.process(r.snippet, source_name=r.title[:30],
-                                              credibility=r.source_credibility)
-                            new_claims += len(result.get("claims", []))
-                    if new_claims:
-                        print(f"  📡 [{round_num}] 搜索\"{topic}\"→{new_claims}条新主张  KG:{len(kg.relations)}关系")
-                        # 更新向量
-                        new_keys = [r.key() for r in kg.relations if r.key() not in {vr.relation_key for vr in vl.relations}]
-                        if new_keys:
-                            new_rels = [r for r in kg.relations if r.key() in new_keys]
-                            vl.batch_index(new_rels)
+                    requests = krm.scan(kg)
+                    if requests:
+                        result = kae.execute_batch(max_requests=2)
+                        if result["new_relations"]:
+                            print(f"  📡 [{round_num}] 采购 {len(requests)} 条知识请求 → 获得 {result['new_relations']} 条新关系  KG:{len(kg.relations)}")
 
                 # ── 2. 探索 ──
                 if kg.relations:
