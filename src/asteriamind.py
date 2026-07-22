@@ -277,45 +277,80 @@ class AsteriaShell(cmd.Cmd):
 
     def do_run(self, arg):
         """自主运行: run [N] (不指定 = 永久循环)
-        每轮: 选话题→搜索→同化→探索→审计→桥接→治理"""
+        条件触发——每个模块只在需要时才被调用, 不是固定节拍器。"""
         forever = not arg.strip() or not arg.strip().isdigit()
         n = int(arg) if arg.strip().isdigit() else 99999
         mode = "永久循环 (Ctrl+C 停止)" if forever else f"{n} 轮"
-        print(f"  🏃 自主运行 {mode}...")
+        print(f"  🏃 自主运行 {mode} (条件触发模式)...")
+
+        # 状态追踪: 每个模块记录上次被调用时间
+        state = {"last_audit": 0, "last_bridge": 0, "last_gov": 0,
+                 "last_search": 0, "vec_since_bridge": 0, "save_count": 0}
 
         round_num = 0
         try:
             while round_num < n:
                 round_num += 1
 
-                # ── 1. 知识缺口监控 → 采购申请 → 执行 → 同化 ──
-                if round_num % 3 == 0 and kg.relations:
+                # ── 触发条件评估 ──
+                triggers = []
+
+                # 搜索: 每轮扫描缺口, 有请求时按间隔执行
+                if kg.relations:
+                    krm.scan(kg)
+                if knowledge_queue and round_num - state["last_search"] >= 3:
+                    urgent = any(hasattr(r, 'urgency') and r.urgency > 0.3 for r in knowledge_queue)
+                    if urgent:
+                        triggers.append("search")
+
+                # 审计: 有高置信度无反证信念, 且距上次 >= 5 轮
+                if round_num - state["last_audit"] >= 5 and kg.relations:
+                    risky = [f for f in auditor.audit(kg) if f.risk_level in ("medium", "high")]
+                    if risky:
+                        triggers.append("audit")
+
+                # 桥接: 新向量数 >= 3, 且距上次 >= 7 轮
+                if state["vec_since_bridge"] >= 3 and round_num - state["last_bridge"] >= 7:
+                    triggers.append("bridge")
+
+                # 治理+演化: 距上次 >= 10 轮
+                if round_num - state["last_gov"] >= 10:
+                    triggers.append("govern")
+
+                # ── 执行触发 ──
+
+                if "search" in triggers:
+                    state["last_search"] = round_num
                     requests = krm.scan(kg)
                     if requests:
                         result = kae.execute_batch(max_requests=2)
                         if result["new_relations"]:
-                            print(f"  📡 [{round_num}] 采购 {len(requests)} 条知识请求 → 获得 {result['new_relations']} 条新关系  KG:{len(kg.relations)}")
+                            state["vec_since_bridge"] += result["new_relations"]
+                            print(f"  📡 [{round_num}] 条件触发: 采购{len(requests)}条请求→{result['new_relations']}新关系  KG:{len(kg.relations)}")
 
-                # ── 2. 探索 ──
+                # 探索: 每轮都做 (轻量级)
                 if kg.relations:
                     goals = kg.generate_goals(max_goals=1)
                     if goals:
-                        engine.generate(kg, goals[0]["target"], goals[0]["type"])
+                        hyps = engine.generate(kg, goals[0]["target"], goals[0]["type"])
+                        if hyps and hyps[0].get("mechanism") in ("未建模模式", "统计偶然"):
+                            evolution.mhg.reflect_on_failure({"data_type": "unknown"})
 
-                # ── 3. 审计 ──
-                if round_num % 5 == 0 and kg.relations:
+                if "audit" in triggers:
+                    state["last_audit"] = round_num
                     risky = [f for f in auditor.audit(kg) if f.risk_level in ("medium", "high")]
                     if risky:
-                        falsifier.run(kg, risky[0].relation_key, max_rounds=3)
+                        result = falsifier.run(kg, risky[0].relation_key, max_rounds=3)
+                        print(f"  🛡️ [{round_num}] 条件触发: 审计 {risky[0].relation_key}")
 
-                # ── 4. 桥接 ──
-                if round_num % 7 == 0 and len(vl.relations) >= 3:
+                if "bridge" in triggers:
+                    state["last_bridge"] = round_num
+                    state["vec_since_bridge"] = 0
                     bridge.discover()
 
-                # ── 5. 治理 + 认知演化 ──
-                if round_num % 5 == 0:
+                if "govern" in triggers:
+                    state["last_gov"] = round_num
                     governance.review(round_num)
-                    # 认知演化检测
                     if kg.relations:
                         goals = kg.generate_goals(max_goals=2)
                         all_hyps = []
@@ -323,15 +358,13 @@ class AsteriaShell(cmd.Cmd):
                             hyps = engine.generate(kg, g["target"], g["type"])
                             all_hyps.extend(hyps)
                         if all_hyps:
-                            # 追踪功能性失效
-                            if all_hyps[0].get("mechanism") == "未建模模式":
-                                evolution.mhg.record_prediction_result("H5", success=False)
                             evo = evolution.observe_and_evolve(goals, all_hyps, kg, round_num)
                             if evo.get("alert") == "meta_hypothesis_generated":
-                                print(f"  🧬 MH: 发现框架缺陷 → 候选模板生成中...")
+                                print(f"  🧬 [{round_num}] 条件触发: MH 发现框架缺陷!")
 
-                # ── 6. 定期保存 ──
+                # ── 保存 ──
                 if round_num % 50 == 0:
+                    state["save_count"] += 1
                     kg.save("asteriamind_autosave.json")
                     print(f"  💾 [{round_num}] 自动保存: {len(kg.relations)} 关系")
 
@@ -660,7 +693,7 @@ class AsteriaShell(cmd.Cmd):
         # ── 认知演化: 框架反思 + 候选理论审稿 + 验证 + 注册 ──
         # 追踪预测失败: 如果 H5 是最优但无法产生可验证预测 → 功能性失效
         if hypotheses and hypotheses[0].get("mechanism") == "未建模模式":
-            evolution.mhg.record_prediction_result("H5", success=False)
+            evolution.mhg.reflect_on_failure({"data_type": "unknown"})
         evo_result = evolution.observe_and_evolve(goals, hypotheses, kg, ROUND)
         if evo_result.get("evolution") == "accepted":
             print(f"\n  🧬 认知演化: 新理论通过审稿并注册!")
