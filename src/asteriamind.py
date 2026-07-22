@@ -68,12 +68,12 @@ ingestor = TextIngestor()
 assimilator = KnowledgeAssimilator(kg, pipeline)
 
 # 四层认知架构
-registry = TemplateRegistry()
+tmpl_registry = TemplateRegistry()
 for t in _builtin_templates():
-    registry.register(t)
-engine = HypothesisEngine(registry)
-evolution = CognitiveEvolutionLayer(registry, kg, wm)
-governance = TheoryGovernance(registry)
+    tmpl_registry.register(t)
+engine = HypothesisEngine(tmpl_registry)
+evolution = CognitiveEvolutionLayer(tmpl_registry, kg, wm)
+governance = TheoryGovernance(tmpl_registry)
 auditor = CertaintyAudit()
 falsifier = FalsificationController()
 source_tracker = SourceAuthorityTracker()
@@ -94,7 +94,7 @@ library.add_fact("物体C", "HAS", "属性N", 0.7)
 library.add_fact("事件1", "TRIGGERS", "事件4", 0.6)
 library.add_fact("事件4", "DEPENDS_ON", "物体A", 0.3)
 
-registry = ToolRegistry()
+registry = ToolRegistry()  # ← 这个覆盖了前面的 TemplateRegistry
 for t in [
     Tool("DiagnosticEngine", "诊断崩塌原因", "collapse"),
     Tool("ExperimentDesigner", "设计验证实验", "explore"),
@@ -257,18 +257,50 @@ class AsteriaShell(cmd.Cmd):
             print("  MotherMind 还没做过决策。先 run <N> 让它看一些数据。")
 
     def do_run(self, arg):
-        """自主运行 N 轮: run 100"""
-        n = int(arg) if arg.strip().isdigit() else 50
-        print(f"  🏃 自主运行 {n} 轮...")
+        """自主运行 N 轮: run 10
+        每轮: explore → audit → bridge → governance → 循环"""
+        n = int(arg) if arg.strip().isdigit() else 10
+        print(f"  🏃 自主运行 {n} 轮 (探索 + 审计 + 桥接 + 治理)...")
 
-        def world(x):
-            return 30 * math.sin(x / 5) + 2 * x + random.gauss(0, 3)
+        for i in range(n):
+            print(f"\n  ══ 第 {i+1}/{n} 轮 ══")
 
-        for _ in range(n):
-            x = random.uniform(0, 25)
-            y = world(x)
-            step(x, y)
-        print(f"  ✅ 完成。当前第 {ROUND} 轮。")
+            # 探索闭环
+            if kg.relations:
+                goals = kg.generate_goals(max_goals=2)
+                if goals:
+                    for goal in goals[:2]:
+                        hyps = engine.generate(kg, goal["target"], goal["type"])
+                        if hyps:
+                            top = hyps[0]
+                            print(f"  🔍 [{goal['target']}] {top['id']}: {top['label'][:60]} (奥卡姆 {top.get('occam_score',0):.2f})")
+
+            # 审计: 怀疑自己的高置信度信念
+            if i % 3 == 0 and kg.relations:
+                audit_findings = auditor.audit(kg)
+                risky = [f for f in audit_findings if f.risk_level in ("medium", "high")]
+                if risky:
+                    print(f"  🛡️ 审计: {len(risky)} 条信念需要压力测试")
+                    for f in risky[:1]:
+                        result = falsifier.run(kg, f.relation_key, max_rounds=5)
+                        print(f"     {f.relation_key}: {result.stop_reason}")
+
+            # 桥接: 跨层发现
+            if i % 5 == 0 and len(vl.relations) >= 3:
+                bridge.discover()
+
+            # 治理: 审查模板健康度
+            if i % 10 == 0:
+                governance.review(ROUND + i)
+                # 认知演化检测
+                if kg.relations:
+                    goals = kg.generate_goals(max_goals=1)
+                    engine.generate(kg, goals[0]["target"], goals[0]["type"]) if goals else None
+
+        print(f"\n  ✅ 完成 {n} 轮自主运行。")
+        active = len([t for t in tmpl_registry.templates.values() if t.status == "active"])
+        print(f"     KG: {len(kg.relations)} 关系 | 向量: {len(vl.relations)} 条 | "
+              f"模板: {active} 活跃")
 
     def do_upload(self, arg):
         """上传数据点: upload x=5.2 y=42.3"""

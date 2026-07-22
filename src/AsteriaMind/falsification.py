@@ -137,6 +137,12 @@ class FalsificationController:
     def reset_budget(self):
         self.remaining_budget = self.energy_budget
 
+    def _find_relation(self, kg, key: str):
+        for r in kg.relations:
+            if r.key() == key:
+                return r
+        return None
+
     def boost_budget(self, amount: float):
         """外部事件(如新证据出现)可以注入预算, 重新打开信念的挑战"""
         self.remaining_budget = min(self.energy_budget, self.remaining_budget + amount)
