@@ -37,6 +37,17 @@ class MathReasoner:
         """解析并求解数学问题。返回 None 如果无法处理。"""
         q = query.strip()
 
+        # 微积分
+        result = self._derivative(q)
+        if result is not None:
+            return result
+        result = self._integral(q)
+        if result is not None:
+            return result
+        result = self._limit(q)
+        if result is not None:
+            return result
+
         # 四则运算
         result = self._arithmetic(q)
         if result is not None:
@@ -238,3 +249,99 @@ class MathReasoner:
                 confidence=0.95,
             )
         return None
+
+    # ── 微积分 ──
+
+    def _derivative(self, q: str) -> Optional[MathResult]:
+        """求导: derivative x^2 at x=3, d/dx x^3"""
+        m = re.search(r"(?:derivative|求导|导数)\s*(?:of\s*)?(.+?)\s*(?:at|在)\s*x\s*=\s*([\d.]+)", q, re.IGNORECASE)
+        if m:
+            expr = m.group(1).strip()
+            x0 = float(m.group(2))
+            return self._numerical_derivative(q, expr, x0)
+
+        m = re.search(r"d/dx\s+(.+)", q)
+        if m:
+            return self._symbolic_derivative(q, m.group(1).strip())
+
+        m = re.search(r"f\(x\)\s*=\s*(.+?)[,;]\s*f'?\(?([\d.]+)\)?", q)
+        if m:
+            return self._numerical_derivative(q, m.group(1).strip(), float(m.group(2)))
+        return None
+
+    def _integral(self, q: str) -> Optional[MathResult]:
+        """定积分: integral x^2 from 0 to 1"""
+        m = re.search(r"(?:integral|积分|∫)\s*(.+?)\s*(?:from|_)\s*([\d.]+)\s*(?:to|_)\s*([\d.]+)", q, re.IGNORECASE)
+        if m:
+            return self._numerical_integral(q, m.group(1).strip(), float(m.group(2)), float(m.group(3)))
+        return None
+
+    def _limit(self, q: str) -> Optional[MathResult]:
+        """极限: limit sin(x)/x as x→0"""
+        m = re.search(r"(?:limit|极限)\s*(.+?)\s*(?:as|当)\s*x\s*→\s*([\d.]+)", q, re.IGNORECASE)
+        if m:
+            return self._numerical_limit(q, m.group(1).strip(), float(m.group(2)))
+        return None
+
+    def _numerical_derivative(self, query: str, expr: str, x0: float) -> MathResult:
+        h = 0.0001
+        def f(x):
+            return self._eval_expr(expr.replace("x", f"({x})"))
+        fxh = f(x0 + h)
+        fxh_m = f(x0 - h)
+        deriv = (fxh - fxh_m) / (2 * h)
+        return MathResult(expression=query, result=round(deriv, 6),
+                          steps=[f"f'({x0}) ≈ ({fxh:.6f} - {fxh_m:.6f}) / {2*h} = {deriv:.6f}"],
+                          confidence=0.9)
+
+    def _symbolic_derivative(self, query: str, expr: str) -> Optional[MathResult]:
+        expr = expr.strip()
+        m = re.match(r'([\d.]*)\s*\*?\s*x\^?(\d+)', expr)
+        if m:
+            a = float(m.group(1)) if m.group(1) else 1.0
+            n = float(m.group(2))
+            r = f"{a*n}x" + (f"^{int(n-1)}" if n > 2 else "")
+            return MathResult(expression=query, result=float(a*n),
+                              steps=[f"d/dx({expr}) = {r}"], confidence=0.95)
+        specials = {"sin(x)": "cos(x)", "cos(x)": "-sin(x)", "e^x": "e^x", "ln(x)": "1/x"}
+        if expr in specials:
+            return MathResult(expression=query, result=0.0,
+                              steps=[f"d/dx({expr}) = {specials[expr]}"], confidence=0.95)
+        return None
+
+    def _numerical_integral(self, query: str, expr: str, a: float, b: float) -> MathResult:
+        n = 1000
+        h = (b - a) / n
+        def f(x):
+            return self._eval_expr(expr.replace("x", f"({x})"))
+        s = f(a) + f(b)
+        for i in range(1, n, 2):
+            s += 4 * f(a + i * h)
+        for i in range(2, n - 1, 2):
+            s += 2 * f(a + i * h)
+        result = s * h / 3
+        return MathResult(expression=query, result=round(result, 6),
+                          steps=[f"∫[{a},{b}] {expr} dx = {result:.6f} (Simpson n={n})"],
+                          confidence=0.9)
+
+    def _numerical_limit(self, query: str, expr: str, target: float) -> MathResult:
+        def f(x):
+            return self._eval_expr(expr.replace("x", f"({x})"))
+        steps = []
+        prev = None
+        for h in [0.1, 0.01, 0.001, 0.0001]:
+            val = f(target + h)
+            steps.append(f"h={h}: f({target+h:.4f}) = {val:.8f}")
+            prev = val
+        return MathResult(expression=query, result=round(f(target + 0.00001), 6),
+                          steps=[f"lim(x→{target}) {expr}:"] + steps,
+                          confidence=0.85)
+
+    def _eval_expr(self, expr: str) -> float:
+        try:
+            return eval(expr.replace('^', '**'), {"__builtins__": {}},
+                       {"math": math, "sqrt": math.sqrt, "pi": math.pi,
+                        "sin": math.sin, "cos": math.cos, "tan": math.tan,
+                        "log": math.log, "exp": math.exp, "abs": abs, "e": math.e})
+        except Exception:
+            return 0.0
