@@ -27,6 +27,69 @@
     "source": "observed"
   },
   {
+    "subject": "打招呼",
+    "predicate": "REPLIES_WITH",
+    "object": "你好呀～",
+    "alpha": 27.0,
+    "beta": 0.9999999999999998,
+    "confidence": 0.9642857142857143,
+    "source": "observed"
+  },
+  {
+    "subject": "谢谢",
+    "predicate": "REPLIES_WITH",
+    "object": "不客气呦",
+    "alpha": 18.0,
+    "beta": 0.9999999999999998,
+    "confidence": 0.9473684210526315,
+    "source": "observed"
+  },
+  {
+    "subject": "着",
+    "predicate": "MEANS",
+    "object": "助词，表示进行中",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "了",
+    "predicate": "MEANS",
+    "object": "表示完成",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "吃饭",
+    "predicate": "MEANS",
+    "object": "用餐",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "搜索",
+    "predicate": "IS_SYNONYM",
+    "object": "查找",
+    "alpha": 16.0,
+    "beta": 1.9999999999999996,
+    "confidence": 0.8888888888888888,
+    "source": "observed"
+  },
+  {
+    "subject": "查找",
+    "predicate": "IS_SYNONYM",
+    "object": "搜索",
+    "alpha": 16.0,
+    "beta": 1.9999999999999996,
+    "confidence": 0.8888888888888888,
+    "source": "observed"
+  },
+  {
     "subject": "咖啡",
     "predicate": "IS_A",
     "object": "一种饮料",
@@ -177,6 +240,114 @@
     "alpha": 18.0,
     "beta": 4.0,
     "confidence": 0.8181818181818182,
+    "source": "observed"
+  },
+  {
+    "subject": "我指",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "指着",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "着对",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "对方",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "方说",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "说了",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "了一",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "一句",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "句话",
+    "predicate": "APPEARED_IN",
+    "object": "我指着对方说了一句话",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "我吃",
+    "predicate": "APPEARED_IN",
+    "object": "我吃饭了",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "吃饭",
+    "predicate": "APPEARED_IN",
+    "object": "我吃饭了",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
+    "source": "observed"
+  },
+  {
+    "subject": "饭了",
+    "predicate": "APPEARED_IN",
+    "object": "我吃饭了",
+    "alpha": 3.0,
+    "beta": 7.0,
+    "confidence": 0.3,
     "source": "observed"
   }
 ]

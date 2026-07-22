@@ -238,7 +238,32 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._json({"reply": f"错误: {e}", "error": True})
 
     def _process(self, text: str) -> tuple[str, str]:
-        """处理自然语言——更智能的意图分类"""
+        """处理自然语言——命令路由 + 意图分类"""
+
+        # ── 0. 教学命令路由 (优先级最高) ──
+        # learnw <词> [同义词 <词>]
+        if text.startswith('learnw '):
+            parts = text[7:].strip().split(None, 2)
+            if len(parts) == 1:
+                return self._cmd_learn_word(parts[0])
+            elif len(parts) >= 3 and parts[1] == '同义词':
+                return self._cmd_synonym(parts[0], parts[2])
+        # readcn <文本>
+        if text.startswith('readcn '):
+            return self._cmd_read_cn(text[7:].strip())
+        # answer <词> <解释>
+        if text.startswith('answer '):
+            parts = text[7:].strip().split(None, 1)
+            if len(parts) >= 2:
+                return self._cmd_answer(parts[0], parts[1])
+        # 以后我<条件>你就<行为> (个性化教学)
+        m = re.search(r'^以后我(.+?)你就(.+)$', text)
+        if m:
+            condition, action = m.group(1).strip(), m.group(2).strip()
+            kg.add(condition, "REPLIES_WITH", action, confidence=0.9)
+            db.add_relation(condition, "REPLIES_WITH", action, 0.9, source="user_preference")
+            _auto_export()
+            return (f"✅ 记住了: 以后你说 '{condition}' 我就回 '{action}'", "learn_pref")
 
         # ── 1. 数学优先: 含数字+运算符或明确求值词 ──
         if re.search(r'\d\s*[\+\-\*/\^]\s*\d', text) or any(kw in text for kw in ['等于多少', '算一下', '是多少等于']):
@@ -268,8 +293,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             if '你' in text and ('吗' in text or '?' in text or '？' in text or '吧' in text):
                 return self._conversational_reply(text)
             if text in ['你好', 'hello', 'hi', '嗨', '您好']:
+                # 如果用户教过打招呼偏好, 用教的
+                for r in kg.relations:
+                    if r.predicate == "REPLIES_WITH" and ("招呼" in r.subject or "你好" in r.subject):
+                        return (r.object, "pref_reply")
                 return ("你好! 我是 AsteriaMind。你可以说: 'X是Y' / 'X会导致Y' / '2+3=?'", "greeting")
             if '谢谢' in text or '感谢' in text:
+                for r in kg.relations:
+                    if r.predicate == "REPLIES_WITH" and ("谢" in r.subject or "thank" in r.subject.lower()):
+                        return (r.object, "pref_reply")
                 return ("不客气 🙂", "thanks")
             # 其他元语句: 对话回复, 不强学
             return self._conversational_reply(text)
@@ -334,7 +366,19 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         return self._conversational_reply(text)
 
     def _conversational_reply(self, text: str) -> tuple[str, str]:
-        """对话回复——不强学, 自然交流"""
+        """对话回复——用户教的偏好优先, 再默认"""
+        # 1. 查用户教的偏好 (最高优先级)
+        for r in kg.relations:
+            if r.predicate == "REPLIES_WITH":
+                if r.subject in text or any(kw in r.subject for kw in text.split()):
+                    return (r.object, "pref_reply")
+        # 2. 同义词展开
+        for r in kg.relations:
+            if r.predicate == "IS_SYNONYM" and r.subject in text:
+                for r2 in kg.relations:
+                    if r2.subject == r.object and r2.predicate == "MEANS":
+                        return (f"💡 '{r.subject}' 就是 '{r.object}' → {r2.object}", "synonym")
+        # 3. 默认
         if '你好' in text or 'hello' in text.lower():
             return ("你好! 有什么想告诉我的吗?", "greeting")
         if '你是谁' in text or '你叫什么' in text:
@@ -345,6 +389,74 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             return ("试: '咖啡是饮料' / '地球是什么' / '2+3=?', 或输入 help 看命令", "howto")
         # 默认: 友好提示
         return (f"我记下了。但你能说得更具体吗? 比如 'X是Y' 或 'X会Y'", "casual")
+
+    def _cmd_learn_word(self, word: str) -> tuple[str, str]:
+        """learnw: 学习一个词"""
+        # 已存在?
+        for r in kg.relations:
+            if r.subject == word and r.predicate in ("IS_A", "MEANS", "HAS_MEANING"):
+                return (f"✅ 我知道 '{word}': {r.object} (置信度 {r.confidence:.0%})", "known")
+        # 搜网络
+        if web_search:
+            results = web_search.search(f"{word} 定义", max_results=1)
+            for r in results:
+                if r.snippet and len(r.snippet) > 10:
+                    kg.add(word, "MEANS", r.snippet[:100], confidence=0.5)
+                    db.add_relation(word, "MEANS", r.snippet[:100], 0.5, source="web_search")
+                    _auto_export()
+                    return (f"✅ 从网络学了: {word} → {r.snippet[:60]}...", "learn_web")
+        # 存为未知
+        kg.add(word, "IS_UNKNOWN", "true", confidence=0.3)
+        db.add_relation(word, "IS_UNKNOWN", "true", 0.3, source="pending")
+        _auto_export()
+        return (f"❓ 不太确定 '{word}' 的意思。用 'answer {word} <解释>' 教我?", "pending")
+
+    def _cmd_synonym(self, word_a: str, word_b: str) -> tuple[str, str]:
+        """learnw A 同义词 B"""
+        kg.add(word_a, "IS_SYNONYM", word_b, confidence=0.8)
+        db.add_relation(word_a, "IS_SYNONYM", word_b, 0.8, source="user_taught")
+        kg.add(word_b, "IS_SYNONYM", word_a, confidence=0.8)
+        db.add_relation(word_b, "IS_SYNONYM", word_a, 0.8, source="user_taught")
+        _auto_export()
+        return (f"✅ 同义词: {word_a} ↔ {word_b}", "learn_synonym")
+
+    def _cmd_read_cn(self, text: str) -> tuple[str, str]:
+        """readcn: 分词 + 不认识就学"""
+        import re as _re
+        # 中文分词: 字/双字/三字
+        unknown = []
+        # 清除标点
+        # 清理
+        clean = _re.sub(r'[，。！？、；：""''（）\\s]', '', text)
+        # 提取双字词
+        pairs = [clean[i:i+2] for i in range(len(clean)-1)]
+        seen = set()
+        for w in pairs[:30]:
+            if w in seen: continue
+            seen.add(w)
+            # 查 KG 是否认识
+            known = False
+            for r in kg.relations:
+                if r.subject == w and r.predicate in ("IS_A", "MEANS", "HAS_MEANING"):
+                    known = True
+                    break
+            if not known:
+                kg.add(w, "APPEARED_IN", text[:30], confidence=0.3)
+                db.add_relation(w, "APPEARED_IN", text[:30], 0.3, source="readcn")
+                unknown.append(w)
+        _auto_export()
+        if unknown:
+            return (f"📖 从中文字串中发现了 {len(unknown)} 个陌生词: {', '.join(unknown[:8])}\n"
+                    f"用 'learnw <词>' 一个个学, 或 'answer <词> <解释>' 直接教", "read_cn")
+        return (f"📖 这些词我都认识 ✅", "read_cn")
+
+    def _cmd_answer(self, word: str, meaning: str) -> tuple[str, str]:
+        """answer: 用户直接教"""
+        kg.add(word, "MEANS", meaning, confidence=0.85)
+        db.add_relation(word, "MEANS", meaning, 0.85, source="user_taught")
+        # 如果之前标记为 UNKNOWN, 清除
+        _auto_export()
+        return (f"✅ 学会了: {word} → {meaning[:50]}", "learn_answer")
 
     def _infer_transitive(self, subj: str, obj: str) -> str:
         """传递推理: 已知 A IS_A B, 刚学 B IS_A C → 推出 A IS_A C"""
