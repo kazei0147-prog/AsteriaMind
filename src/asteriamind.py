@@ -312,9 +312,23 @@ class AsteriaShell(cmd.Cmd):
                 if round_num % 7 == 0 and len(vl.relations) >= 3:
                     bridge.discover()
 
-                # ── 5. 治理 ──
-                if round_num % 15 == 0:
+                # ── 5. 治理 + 认知演化 ──
+                if round_num % 5 == 0:
                     governance.review(round_num)
+                    # 认知演化检测
+                    if kg.relations:
+                        goals = kg.generate_goals(max_goals=2)
+                        all_hyps = []
+                        for g in goals[:2]:
+                            hyps = engine.generate(kg, g["target"], g["type"])
+                            all_hyps.extend(hyps)
+                        if all_hyps:
+                            # 追踪功能性失效
+                            if all_hyps[0].get("mechanism") == "未建模模式":
+                                evolution.mhg.record_prediction_result("H5", success=False)
+                            evo = evolution.observe_and_evolve(goals, all_hyps, kg, round_num)
+                            if evo.get("alert") == "meta_hypothesis_generated":
+                                print(f"  🧬 MH: 发现框架缺陷 → 候选模板生成中...")
 
                 # ── 6. 定期保存 ──
                 if round_num % 50 == 0:
@@ -644,6 +658,9 @@ class AsteriaShell(cmd.Cmd):
             print(f"     🧪 区分实验: 采样 20 个点看实际模式")
 
         # ── 认知演化: 框架反思 + 候选理论审稿 + 验证 + 注册 ──
+        # 追踪预测失败: 如果 H5 是最优但无法产生可验证预测 → 功能性失效
+        if hypotheses and hypotheses[0].get("mechanism") == "未建模模式":
+            evolution.mhg.record_prediction_result("H5", success=False)
         evo_result = evolution.observe_and_evolve(goals, hypotheses, kg, ROUND)
         if evo_result.get("evolution") == "accepted":
             print(f"\n  🧬 认知演化: 新理论通过审稿并注册!")

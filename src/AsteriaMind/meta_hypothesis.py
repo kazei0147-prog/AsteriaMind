@@ -35,24 +35,31 @@ class MetaHypothesisGenerator:
 
     def observe(self, goals: list[dict], hypotheses: list[dict],
                 kg, exploration_round: int) -> dict:
-        """
-        观察一次完整的探索循环, 记录系统级模式。
-        返回本次观察的元分析结果。
-        """
         if not hypotheses or len(hypotheses) < 2:
             return {"alert": "insufficient_data"}
 
-        # 分析模式
         patterns = self._analyze_patterns(goals, hypotheses, kg)
+
+        # 自动检测: H3/H5 主导 = 预测必然失败 (两者本质上都不可测试)
+        if patterns.get("top_mechanism") in ("统计偶然", "未建模模式"):
+            patterns["prediction_failures"] = patterns.get("prediction_failures", 0) + 1
+
         self.meta_log.append(patterns)
 
-        # 如果多个探索循环都显示同一模式 → 触发元假说
         if self._should_generate(patterns):
             mh = self._generate(patterns, exploration_round)
             self.generated.append(mh)
             return {"alert": "meta_hypothesis_generated", "hypothesis": mh}
 
         return {"alert": "none", "patterns": patterns}
+
+    def record_prediction_result(self, hypothesis_id: str, success: bool):
+        """记录一次假说的预测结果——用于触发功能性失效检测"""
+        if self.meta_log:
+            last = self.meta_log[-1]
+            last.setdefault("prediction_failures", 0)
+            if not success:
+                last["prediction_failures"] += 1
 
     def _analyze_patterns(self, goals, hypotheses, kg) -> dict:
         """分析本次探索中 H1-H6 的集体表现"""
@@ -79,60 +86,36 @@ class MetaHypothesisGenerator:
         return patterns
 
     def _should_generate(self, patterns: dict) -> bool:
-        """判断是否应该生成元假说"""
-        # 条件: 最近 N 次探索中, 某个模式反复出现
-        if len(self.meta_log) < 2:
+        """
+        TRIGGER_CognitiveGap_FunctionalFailure:
+          H3(巧合)或H5(未建模)连续主导,
+          且都无法产生可验证预测 → 系统性功能缺失。
+        """
+        if len(self.meta_log) < 3:
             return False
 
-        recent = self.meta_log[-3:]
+        recent = self.meta_log[-5:]
 
-        # 模式1: 连续被"统计偶然"主导 → 框架缺乏解释力
-        coincidence_streak = sum(1 for p in recent if p.get("dominated_by_coincidence"))
-        if coincidence_streak >= 2:
-            return True
+        # 无用的解释者: H3 或 H5 主导
+        useless_winner = sum(1 for p in recent
+                             if p.get("top_mechanism") in ("统计偶然", "未建模模式"))
+        prediction_fails = sum(1 for p in recent
+                               if p.get("prediction_failures", 0) > 0)
+        no_other_active = all(
+            p.get("max_occam", 0) < 0.5 for p in recent
+        )
 
-        # 模式2: 所有假说低置信度 → 现有框架不适用
-        all_low_streak = sum(1 for p in recent if p.get("all_low_confidence"))
-        if all_low_streak >= 2:
-            return True
-
-        # 模式3: 同质化 — 所有假说用同一机制, 缺乏多样性
-        homogeneous_streak = sum(1 for p in recent if p.get("homogeneous"))
-        if homogeneous_streak >= 2:
-            return True
-
-        return False
+        return useless_winner >= 3 and prediction_fails >= 2 and no_other_active
 
     def _generate(self, patterns: dict, round_num: int) -> MetaHypothesis:
-        """根据观察到的失败模式, 生成一个关于思维框架本身的假说"""
+        """功能性失效: H5赢但预测失败 → 缺少操作性工具"""
         self.generation_count += 1
 
-        # 诊断: 什么模式驱动了框架级失败?
-        if patterns.get("dominated_by_coincidence"):
-            label = "当前假说框架过度依赖'巧合'解释——可能缺少动态因果/反馈/时序建模能力"
-            evidence = f"最近多次探索中, '统计偶然'始终是奥卡姆最优假说"
-            fix = "建议引入时间序列意识或反馈环检测——让假说可以包含'X 在短/长期影响不同'这类条件结构"
-            conf = 0.6
-        elif patterns.get("all_low_confidence"):
-            label = "所有现有假说类型置信度都极低——框架可能缺少适合当前领域的解释类型"
-            evidence = f"H1-H6 最高奥卡姆分仅 {patterns['max_occam']:.3f}"
-            fix = "建议扩展假说模板: 增加'非线性关系'、'阈值效应'、'多体交互'等类型"
-            conf = 0.5
-        elif patterns.get("homogeneous"):
-            label = "假说生成同质化——所有候选解释使用相同机制, 缺乏真正多样的视角"
-            evidence = f"只有一种机制类型被使用"
-            fix = "建议引入多样性激励机制: 对重复出现的机制类型施加递减权重"
-            conf = 0.4
-        elif patterns.get("no_temporal"):
-            label = "所有假说都忽略时间维度——可能所有解释都假设静态关系"
-            evidence = "没有假说提到时间、序列、先后顺序"
-            fix = "建议引入时序感知: 记录关系成立的时间条件, 允许'X 先于 Y 时导致 Z'类假说"
-            conf = 0.5
-        else:
-            label = "假说框架在反复的探索中未能有效收敛——可能需要新维度"
-            evidence = "多种失败模式同时出现"
-            fix = "建议对假说框架做系统性审查, 而非继续在现有空间内搜索"
-            conf = 0.3
+        label = "现有框架存在功能性缺口——'未建模模式'是最优假说, 但无法产生可验证预测"
+        evidence = (f"最近5次探索中, H5(未建模模式)连续主导, "
+                    f"但基于H5的预测持续失败——拥有解释, 缺乏操作性工具")
+        fix = "需要一种能将'结构相似性/数值规律'转化为可验证预测的操作性模板"
+        conf = 0.7
 
         return MetaHypothesis(
             id=f"MH_{self.generation_count}",
