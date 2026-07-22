@@ -43,6 +43,7 @@ from AsteriaMind.certainty_audit import CertaintyAudit
 from AsteriaMind.falsification import (
     FalsificationController, SourceAuthorityTracker, WebSearchInterface,
 )
+from AsteriaMind.vector_layer import VectorLayer
 
 random.seed(42)
 
@@ -75,6 +76,7 @@ auditor = CertaintyAudit()
 falsifier = FalsificationController()
 source_tracker = SourceAuthorityTracker()
 web_search = WebSearchInterface()
+vl = VectorLayer(dim=128)
 governance = TheoryGovernance(registry)
 
 # 预填充知识库 (AM 可以自己查)
@@ -304,6 +306,50 @@ class AsteriaShell(cmd.Cmd):
                 print(f"      {pred} → {obj} ({conf})")
             if len(facts) > 3:
                 print(f"      ...等 {len(facts)} 条")
+    def do_index(self, arg):
+        """批量建立向量索引: index"""
+        if not kg.relations:
+            print("  ⚠️ 知识图谱为空, 先 learn/read/explore。")
+            return
+        vl.batch_index(kg.relations)
+        print(f"  ✅ 已为 {len(vl.relations)} 条知识建立向量索引 (dim={vl.dim})")
+
+    def do_semantic(self, arg):
+        """语义搜索: semantic <查询>"""
+        query = arg.strip()
+        if not query:
+            print("  用法: semantic <查询文本>")
+            return
+        if not vl.relations:
+            print("  ⚠️ 先运行 index 建立向量索引。")
+            return
+        results = vl.search(query, top_k=5)
+        print(f"  🔍 语义搜索: \"{query}\"")
+        for key, sim, meta in results:
+            bar = "█" * int(sim * 10) + "░" * (10 - int(sim * 10))
+            print(f"    {key:50s} [{bar}] {sim:.2f}")
+
+    def do_analogy(self, arg):
+        """类比推理: analogy <概念>"""
+        concept = arg.strip()
+        if not concept:
+            print("  用法: analogy <概念>")
+            return
+        results = vl.analogy(concept, top_k=5)
+        print(f"  💡 类比: \"{concept}\" 的最近邻:")
+        for key, sim in results:
+            print(f"    {key:50s} 相似度 {sim:.2f}")
+
+    def do_assoc(self, arg):
+        """关联发现: assoc"""
+        pairs = vl.find_associations(min_similarity=0.2)
+        if not pairs:
+            print("  🔗 未发现隐藏关联。")
+            return
+        print(f"  🔗 发现 {len(pairs)} 对隐含关联 (向量相似但无直接边):")
+        for a, b, sim in pairs[:5]:
+            print(f"    {a[:40]} ↔ {b[:40]}  [{sim:.2f}]")
+
     def do_search(self, arg):
         """网络搜索: search <查询词>"""
         query = arg.strip()
