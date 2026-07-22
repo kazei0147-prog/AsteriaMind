@@ -138,8 +138,9 @@ class HypothesisEngine:
                     all_hypotheses.extend(hypotheses)
                     tmpl.times_used += 1
                     tmpl.total_energy_spent += tmpl.energy_cost_per_use
-            except Exception:
-                pass  # 模板失败不影响其他模板
+            except Exception as e:
+                tmpl.energy_bankrupt_count += 1
+                tmpl.notes = f"{tmpl.notes} | 失败@{round(time.time())}:{str(e)[:60]}"
 
         # 奥卡姆排序
         return self._occam_rank(all_hypotheses)
