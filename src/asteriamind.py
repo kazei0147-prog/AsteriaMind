@@ -56,6 +56,7 @@ from AsteriaMind.active_learner import ActiveLearner
 from AsteriaMind.knowledge_db import KnowledgeDB
 
 random.seed(42)
+import re, json
 
 # ═══════════════ 初始化 ═══════════════
 kg = KnowledgeGraph()
@@ -647,7 +648,113 @@ class AsteriaShell(cmd.Cmd):
         r = learner.answer_question(parts[0], parts[1])
         print(f"  ✅ 已学会: {r['learned']} → {r['answer'][:40]}")
 
-    def do_env(self, arg):
+    def do_talk(self, arg):
+        """
+        自然语言交互: talk <你说的话>
+
+        AM 自动分类:
+          - 事实陈述 ("地球是行星") → 提取三元组存入 KG
+          - 问题 ("咖啡能让人清醒吗?") → 查 KG 回答
+          - 数学 ("2+3=?") → 交给 math_solve
+          - 指令 ("搜索黑洞") → 交给对应 Skill
+        """
+        text = arg.strip()
+        if not text:
+            print("  用法: talk <你说的话>")
+            return
+        print(f"  💬 你: {text}")
+
+        # ── 分类 ──
+        intent = self._classify(text)
+
+        if intent == "fact":
+            self._handle_fact(text)
+        elif intent == "question":
+            self._handle_question(text)
+        elif intent == "math":
+            result = skill_lib.best_match(text)
+            if result:
+                r = result.execute(text, kg)
+                val = r.get("result") if r.get("success") else r.get("error")
+                print(f"  🧮 AM: {val}")
+        elif intent == "command":
+            if "搜索" in text or "search" in text.lower():
+                query = text.replace("搜索", "").replace("search", "").strip()
+                results = web_search.search(query)
+                for r in results[:3]:
+                    print(f"  📄 {r.title}: {r.snippet[:100]}")
+            elif "运行" in text or "run" in text.lower():
+                print("  🏃 使用 run <N> 命令启动自主运行")
+            else:
+                print(f"  ❓ AM: 不太确定你想做什么。试试: 地球是行星 / 咖啡会让人清醒吗 / 2+3=?")
+        else:
+            print(f"  ❓ AM: 没听懂。你是想说一个事实、问一个问题、还是算一个数学题?")
+
+    def _classify(self, text: str) -> str:
+        """分类用户意图: fact / question / math / command"""
+        # 数学: 含数字+运算符
+        if re.search(r'\d+[\+\-\*/\^]', text):
+            return "math"
+        if re.search(r'[?？]', text):
+            return "question"
+        # 命令
+        if any(kw in text for kw in ["搜索", "查一下", "运行", "run", "help", "帮助"]):
+            return "command"
+        # 默认: 事实陈述
+        if "是" in text or "属于" in text or "等于" in text or "= " in text:
+            return "fact"
+        return "question"
+
+    def _handle_fact(self, text: str):
+        """从自然语言提取三元组"""
+        import re as _re
+        # 模式1: A 是 B ("咖啡是饮料")
+        m = _re.search(r'(.+?)是(.+)', text)
+        if m:
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            self._learn_triple(subj, "IS_A", obj, 0.7)
+            print(f"  ✅ AM: 学会了: {subj} 是一种 {obj}")
+            return
+        # 模式2: A 会/能/可以 B ("咖啡会让人清醒")
+        m = _re.search(r'(.+?)(?:能|会|可以|导致|引起)(.+)', text)
+        if m:
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            self._learn_triple(subj, "CAUSES", obj, 0.6)
+            print(f"  ✅ AM: 学会了: {subj} 会导致 {obj}")
+            return
+        print(f"  ❓ AM: 没提取出关系, 请用 'A是B' 或 'A会导致B' 的格式")
+
+    def _handle_question(self, text: str):
+        """从 KG 回答问题"""
+        # 提取查询主体
+        import re as _re
+        # "咖啡能让人清醒吗?" → 查 咖啡 CAUSES 清醒
+        m = _re.search(r'(.+?)(?:能|会|是|可以)(.+)吗?[?？]?', text)
+        if m:
+            subj = m.group(1).strip()
+            obj_hint = m.group(2).strip()
+            found = kg.query(subject=subj)
+            if found:
+                for r in found:
+                    print(f"  🧠 AM: {r.subject} --[{r.predicate}]--> {r.object} (可信度 {r.confidence:.0%})")
+            else:
+                print(f"  ❓ AM: 我不认识 '{subj}'。试试说 'talk {subj}是什么' 给我信息?")
+                learner.ask_user(subj, f"用户问了关于'{subj}'的问题, 但KG中没有相关信息")
+            return
+
+        # 简单查 KG
+        words = text.replace("?", "").replace("？", "").split()
+        for w in words[:3]:
+            found = kg.query(subject=w)
+            if found:
+                for r in found[:3]:
+                    print(f"  🧠 AM: {r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})")
+                return
+        print(f"  ❓ AM: 关于这个我还不知道, 告诉我吧")
+
+    def _learn_triple(self, subj: str, pred: str, obj: str, conf: float):
+        kg.add(subj, pred, obj, confidence=conf)
+        db.add_relation(subj, pred, obj, conf, source="natural_language")
         """检查环境: env"""
         env = ctool.check_env()
         for k, v in env.items():
