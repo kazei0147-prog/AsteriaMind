@@ -39,6 +39,7 @@ from AsteriaMind.hypothesis_template import (
     _builtin_templates, HypothesisTemplate,
 )
 from AsteriaMind.cognitive_evolution import CognitiveEvolutionLayer
+from AsteriaMind.certainty_audit import CertaintyAudit
 
 random.seed(42)
 
@@ -66,6 +67,8 @@ for t in _builtin_templates():
     registry.register(t)
 engine = HypothesisEngine(registry)
 evolution = CognitiveEvolutionLayer(registry, kg, wm)
+governance = TheoryGovernance(registry)
+auditor = CertaintyAudit()
 governance = TheoryGovernance(registry)
 
 # 预填充知识库 (AM 可以自己查)
@@ -295,6 +298,12 @@ class AsteriaShell(cmd.Cmd):
                 print(f"      {pred} → {obj} ({conf})")
             if len(facts) > 3:
                 print(f"      ...等 {len(facts)} 条")
+    def do_audit(self, arg):
+        """压力测试高置信度信念: audit"""
+        print(f"\n  🔍 信念压力测试 — 寻找结构性盲区")
+        print(f"  {'─'*50}")
+        summary = auditor.summarize(kg)
+        print(f"  {summary}")
 
     def do_read(self, arg):
         """阅读文本并同化: read <文本> [来源] [可信度]"""
