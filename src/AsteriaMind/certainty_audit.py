@@ -99,3 +99,36 @@ class CertaintyAudit:
                 lines.append(f"      ⚠ {reason}")
             lines.append(f"      → {f.recommended_action}")
         return "\n".join(lines)
+
+    def act_on_findings(self, kg, engine=None) -> list[dict]:
+        """
+        不只是诊断——对每条高风险发现, 生成对应的探索行动。
+        """
+        findings = self.audit(kg)
+        actions = []
+
+        for f in findings:
+            if f.risk_level not in ("high", "medium"):
+                continue
+
+            subject = f.relation_key.split("--[")[0].strip()
+
+            if "无反证" in str(f.reasons):
+                kg.add(f"{subject}_falsification_test", "SEEKS_DISPROOF_OF",
+                       f.relation_key, confidence=0.3, source="certainty_audit")
+                actions.append({
+                    "finding": f.relation_key,
+                    "action": "falsification_targeted",
+                    "detail": "创建了反证搜寻标记, 接下来 explore 会优先验证",
+                })
+
+            if "相关非因果" in str(f.reasons):
+                kg.add(f.relation_key, "NEEDS_CAUSAL_VALIDATION", "共因排除实验",
+                       confidence=0.6, source="certainty_audit")
+                actions.append({
+                    "finding": f.relation_key,
+                    "action": "causal_validation_queued",
+                    "detail": "标记为需要因果验证",
+                })
+
+        return actions

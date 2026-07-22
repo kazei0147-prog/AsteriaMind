@@ -305,6 +305,13 @@ class AsteriaShell(cmd.Cmd):
         summary = auditor.summarize(kg)
         print(f"  {summary}")
 
+        # 不只是说——做了才算
+        actions = auditor.act_on_findings(kg, engine)
+        if actions:
+            print(f"\n  ⚡ 对高风险发现执行了 {len(actions)} 项行动:")
+            for a in actions:
+                print(f"     [{a['action']}] {a['detail']}")
+
     def do_read(self, arg):
         """阅读文本并同化: read <文本> [来源] [可信度]"""
         parts = arg.split("|")
