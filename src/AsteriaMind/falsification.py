@@ -31,25 +31,34 @@ class FalsificationResult:
 
 class FalsificationController:
     """
-    反证实验控制器: 不是无差别攻击, 而是有限制的挑战。
+    反证实验控制器: 有限制的挑战——但不阻碍未来学习。
 
-    停止条件:
-      1. 信念已稳固: 如果连续 N 次攻击后置信度变化 < ε → 停止 (这可能是真信念)
-      2. 信念已崩溃: 如果置信度降到 0.2 以下 → 停止 (没必要继续打)
-      3. 抗压上限: 最多攻击 20 轮, 之后无论结果如何 → 停止并标记为 "抗压测试完成"
-      4. 自我纠正: 如果 β 的增长趋势在减速 → 信念可能找到了平衡点
+    停止条件不是永久关闭, 而是 "暂停并等待新证据":
+      1. 抗压上限: 由能量预算决定, 不是硬编码 20 轮
+      2. 信念稳固: 连续 N 轮攻击无效 → 暂停 (但信念标记为 'survived_challenge', 可被新证据重新打开)
+      3. 信念崩溃: 置信度 < 最低阈值 → 暂停 (标记为 'likely_false', 如新证据出现可复活)
+      4. 能量耗尽: 剩余预算 < 单轮成本 → 暂停 (等下次能量周期)
+
+    关键: 暂停 ≠ 永久关闭。任何被暂停的信念如果收到新的支持证据,
+    反证预算会重新激活。
     """
 
-    MAX_ROUNDS = 20
     MIN_CONFIDENCE = 0.15
-    STABILIZATION_THRESHOLD = 0.02  # 连续 3 轮置信度变化 < 2% → 稳定
+    STABILIZATION_THRESHOLD = 0.02
+    STABILIZATION_ROUNDS = 3
+
+    def __init__(self, energy_budget: float = 100.0, energy_per_round: float = 5.0):
+        self.energy_budget = energy_budget
+        self.energy_per_round = energy_per_round
+        self.remaining_budget = energy_budget
 
     def run(self, kg, target_belief_key: str, max_rounds: int = None) -> FalsificationResult:
         """
-        对一条信念执行反证实验——但知道什么时候该停。
-        返回完整的实验记录。
+        反证实验——知道什么时候暂停, 但不永久关闭大门。
         """
-        max_r = max_rounds or self.MAX_ROUNDS
+        self.remaining_budget = self.energy_budget
+        max_r = min(max_rounds or 999, int(self.remaining_budget / self.energy_per_round))
+
         rel = self._find_relation(kg, target_belief_key)
         if not rel:
             return FalsificationResult(
@@ -62,17 +71,30 @@ class FalsificationController:
         pre_beta = rel.belief.beta
         pre_conf = rel.confidence
 
-        subject = target_belief_key.split("--[")[0].strip()
-        pred = target_belief_key.split("--[")[1].split("]-->")[0].strip()
-        obj = target_belief_key.split("]-->")[1].strip()
+        # 提取 subject/predicate/object
+        parts = target_belief_key.split("--[")
+        subject = parts[0].strip()
+        pred_obj = parts[1].split("]-->")
+        pred = pred_obj[0].strip()
+        obj = pred_obj[1].strip()
 
         prev_conf = pre_conf
         stable_count = 0
 
         for round_num in range(max_r):
+            # 能量检查: 每一轮攻击消耗能量
+            if self.remaining_budget < self.energy_per_round:
+                stop_reason = f"能量耗尽 (剩余 {self.remaining_budget:.1f} < 单轮成本 {self.energy_per_round})"
+                if round_num == 0:
+                    # 一轮都没跑 → 回退默认
+                    break
+                return self._build_result(rel, pre_alpha, pre_beta, pre_conf,
+                                          round_num, prev_conf > 0.5, stop_reason)
+
             kg.observe(subject, pred, obj, correct=False, weight=0.5,
-                       context=f"反证实验第{round_num+1}轮",
+                       context=f"反证实验第{round_num+1}轮 (预算:{self.remaining_budget:.0f})",
                        alternative="系统审计触发的反设场景验证")
+            self.remaining_budget -= self.energy_per_round
 
             current_rel = self._find_relation(kg, target_belief_key)
             if not current_rel:
@@ -80,53 +102,56 @@ class FalsificationController:
             current_conf = current_rel.confidence
             delta = abs(current_conf - prev_conf)
 
-            # 停止条件 1: 信念已稳固 (攻击无效)
+            # 停止条件 1: 信念稳定 — 但可被新证据重新打开
             if delta < self.STABILIZATION_THRESHOLD:
                 stable_count += 1
-                if stable_count >= 3:
-                    return FalsificationResult(
-                        target_belief=target_belief_key, pre_alpha=pre_alpha, pre_beta=pre_beta,
-                        pre_confidence=pre_conf,
-                        post_alpha=current_rel.belief.alpha, post_beta=current_rel.belief.beta,
-                        post_confidence=current_conf,
-                        rounds=round_num + 1, survived=True,
-                        stop_reason=f"信念稳定 ({round_num+1}轮攻击无效, 变化<2%), 这可能是真信念",
-                    )
+                if stable_count >= self.STABILIZATION_ROUNDS:
+                    # 暂停, 标记为可重新激活
+                    kg.add(target_belief_key, "SURVIVED_CHALLENGE", f"{round_num+1}轮",
+                           confidence=current_conf, source="falsification_controller")
+                    return self._build_result(current_rel, pre_alpha, pre_beta, pre_conf,
+                                              round_num + 1, True,
+                                              f"信念稳定: {round_num+1}轮攻击变化<2%, 暂停待新证据")
             else:
                 stable_count = 0
                 prev_conf = current_conf
 
-            # 停止条件 2: 信念已崩溃
+            # 停止条件 2: 信念崩溃 — 但新证据可以复活它
             if current_conf < self.MIN_CONFIDENCE:
-                return FalsificationResult(
-                    target_belief=target_belief_key, pre_alpha=pre_alpha, pre_beta=pre_beta,
-                    pre_confidence=pre_conf,
-                    post_alpha=current_rel.belief.alpha, post_beta=current_rel.belief.beta,
-                    post_confidence=current_conf,
-                    rounds=round_num + 1, survived=False,
-                    stop_reason=f"信念崩溃 (置信度 {current_conf:.2f} < {self.MIN_CONFIDENCE}), 该信念可能需要重新审视",
-                )
+                kg.add(target_belief_key, "COLLAPSED_AFTER", f"{round_num+1}轮反证",
+                       confidence=current_conf, source="falsification_controller")
+                return self._build_result(current_rel, pre_alpha, pre_beta, pre_conf,
+                                          round_num + 1, False,
+                                          f"信念崩溃 (信 {current_conf:.2f} < {self.MIN_CONFIDENCE}), "
+                                          f"等待新证据")
 
-        # 达到最大轮数
+        # 达到最大轮数/能量耗尽
         final_rel = self._find_relation(kg, target_belief_key)
-        final_conf = final_rel.confidence if final_rel else 0
-        survived = final_conf > 0.5
-        return FalsificationResult(
-            target_belief=target_belief_key, pre_alpha=pre_alpha, pre_beta=pre_beta,
-            pre_confidence=pre_conf,
-            post_alpha=final_rel.belief.alpha if final_rel else 0,
-            post_beta=final_rel.belief.beta if final_rel else 0,
-            post_confidence=final_conf,
-            rounds=max_r, survived=survived,
-            stop_reason=f"达到最大轮数 ({max_r}), "
-                        f"{'信念经受住了考验!' if survived else '信念已被显著削弱'}",
-        )
+        survived = (final_rel.confidence if final_rel else 0) > 0.5
+        budget_left = self.remaining_budget
+        return self._build_result(final_rel, pre_alpha, pre_beta, pre_conf,
+                                  max_r, survived,
+                                  f"{'能量耗尽' if budget_left < self.energy_per_round else '达到限制'} "
+                                  f"({'幸存!' if survived else '削弱'}) — 有新证据时可重新挑战")
 
-    def _find_relation(self, kg, key: str):
-        for r in kg.relations:
-            if r.key() == key:
-                return r
-        return None
+    def reset_budget(self):
+        self.remaining_budget = self.energy_budget
+
+    def boost_budget(self, amount: float):
+        """外部事件(如新证据出现)可以注入预算, 重新打开信念的挑战"""
+        self.remaining_budget = min(self.energy_budget, self.remaining_budget + amount)
+
+    def _build_result(self, rel, pre_a, pre_b, pre_c, rounds, survived, reason):
+        if rel is None:
+            return FalsificationResult(
+                target_belief="", pre_alpha=pre_a, pre_beta=pre_b, pre_confidence=pre_c,
+                post_alpha=pre_a, post_beta=pre_b, post_confidence=pre_c,
+                rounds=rounds, survived=survived, stop_reason=reason)
+        return FalsificationResult(
+            target_belief="", pre_alpha=pre_a, pre_beta=pre_b, pre_confidence=pre_c,
+            post_alpha=rel.belief.alpha, post_beta=rel.belief.beta,
+            post_confidence=rel.confidence,
+            rounds=rounds, survived=survived, stop_reason=reason)
 
 
 # ═══════════════ 2. 来源动态权威评估 ═══════════════

@@ -57,6 +57,14 @@ class HypothesisTemplate:
     # 治理数据
     times_used: int = 0
     times_successful: int = 0   # 预测被确认的次数
+    total_occam_rank: float = 0  # 累计奥卡姆排名
+
+    # 能量经济
+    energy_cost_per_use: float = 1.0       # 每次使用消耗
+    energy_earned_per_success: float = 3.0  # 成功挣回
+    total_energy_spent: float = 0.0
+    total_energy_earned: float = 0.0
+    energy_bankrupt_count: int = 0
     total_occam_rank: float = 0  # 累计奥卡姆排名 (1=最高)
     explain_gain: float = 0.0    # 历史解释增益
     created_at: float = field(default_factory=time.time)
@@ -69,15 +77,20 @@ class HypothesisTemplate:
         return self.times_successful / max(1, self.times_used)
 
     @property
+    def energy_efficiency(self) -> float:
+        """能量回报率: 挣回 / 消耗。>1.0 表示盈利"""
+        return self.total_energy_earned / max(1.0, self.total_energy_spent)
+
+    @property
     def health(self) -> float:
         """
-        理论健康度: 兼顾使用频率、成功率和简洁性。
-        健康度低的模板会被 Governance 降级或归档。
+        理论健康度: 使用频率 + 成功率 + 简洁性 + 能量效率。
         """
-        usage = min(1.0, self.times_used / 50)       # 至少用 50 次才能满分
+        usage = min(1.0, self.times_used / 50)
         success = self.success_rate
         simplicity = 1.0 / (1.0 + self.complexity_cost)
-        return (usage * 0.3 + success * 0.4 + simplicity * 0.3)
+        energy = min(1.0, self.energy_efficiency)
+        return (usage * 0.2 + success * 0.35 + simplicity * 0.2 + energy * 0.25)
 
 
 # ═══════════════ Layer 1: HypothesisEngine ═══════════════
@@ -124,6 +137,7 @@ class HypothesisEngine:
                         }
                     all_hypotheses.extend(hypotheses)
                     tmpl.times_used += 1
+                    tmpl.total_energy_spent += tmpl.energy_cost_per_use
             except Exception:
                 pass  # 模板失败不影响其他模板
 
@@ -140,6 +154,20 @@ class HypothesisEngine:
                      - cx.get("base_cost", 0))
             h["occam_score"] = round(max(0.0, score), 3)
         return sorted(hypotheses, key=lambda h: -h["occam_score"])
+
+    def get_energy_status(self) -> dict:
+        """所有模板的能量报告: 用于联动 FalsificationController"""
+        total_energy = sum(t.total_energy_spent for t in self.registry.templates.values())
+        earnings = sum(t.total_energy_earned for t in self.registry.templates.values())
+        return {
+            "total_spent": total_energy,
+            "total_earned": earnings,
+            "net_energy": earnings - total_energy,
+            "templates": {
+                tid: {"efficiency": t.energy_efficiency, "bankrupt": t.energy_bankrupt_count}
+                for tid, t in self.registry.templates.items()
+            },
+        }
 
 
 # ═══════════════ Layer 2: TemplateRegistry ═══════════════
@@ -223,6 +251,12 @@ class TheoryGovernance:
             if tmpl.times_used > 20 and health < 0.2:
                 self.registry.deprecate(tid, f"健康度 {health:.2f} < 0.2")
                 actions.append({"action": "deprecated", "template": tid, "health": health})
+
+            # 能量经济: 持续亏损 → 降级
+            if tmpl.times_used > 30 and tmpl.energy_efficiency < 0.5:
+                tmpl.energy_bankrupt_count += 1
+                if tmpl.energy_bankrupt_count >= 3:
+                    self.registry.deprecate(tid, f"能量回报率 {tmpl.energy_efficiency:.2f} < 0.5 (连续{tmpl.energy_bankrupt_count}次)")
 
             # 长期未使用 (candidate/testing 状态尤甚)
             if tmpl.status in ("candidate", "testing"):
