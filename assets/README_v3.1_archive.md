@@ -440,7 +440,7 @@ cd src && python visualize.py --input ../experiments/exp01_default_convergence \
 
 ---
 
-## 十、致谢
+## 致谢
 
 - **DeepSeek 与 腾讯元宝（Yuanbao）**：在漫长的推演对话中，协助将直觉性的构想转化为可表述的架构，并帮助定位了耗散结构等理论参照系。
 
