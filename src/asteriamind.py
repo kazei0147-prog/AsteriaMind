@@ -45,6 +45,7 @@ from AsteriaMind.falsification import (
 )
 from AsteriaMind.vector_layer import VectorLayer
 from AsteriaMind.human_review import HumanReviewInterface, ProvenanceGuard
+from AsteriaMind.cross_layer import CrossLayerBridge, QueryRouter
 
 random.seed(42)
 
@@ -80,6 +81,8 @@ web_search = WebSearchInterface()
 vl = VectorLayer(dim=128)
 provenance = ProvenanceGuard()
 reviewer = HumanReviewInterface(kg, provenance)
+bridge = CrossLayerBridge(kg, vl)
+router = QueryRouter(kg, vl, bridge)
 
 # 预填充知识库 (AM 可以自己查)
 library.add_fact("物体A", "HAS", "属性X", 0.9)
@@ -370,6 +373,41 @@ class AsteriaShell(cmd.Cmd):
         elif action == "uncertain":
             result = reviewer.review_uncertain(key)
         print(f"  {result}")
+
+    def do_bridge(self, arg):
+        """跨层发现: bridge — 向量空间→符号层 映射"""
+        print(f"\n  🌉 跨层桥接 — 向量空间结构 → 符号知识")
+        print(f"  {'─'*50}")
+        discovery = bridge.discover()
+        print(f"  🏷️  发现 {len(discovery['clusters'])} 个隐式语义群组:")
+        for c in discovery["clusters"][:5]:
+            print(f"     [{c.coherence:.2f}] {c.label_hint} ({len(c.members)} 成员)")
+            for m in c.members[:3]:
+                print(f"        · {m}")
+        print(f"  🧭 发现 {len(discovery['directions'])} 个方向模式:")
+        for d in discovery["directions"][:3]:
+            print(f"     [{d.coherence:.2f}] {d.insight}")
+        if discovery["cross_mappings"]:
+            print(f"  🔗 跨层映射: {len(discovery['cross_mappings'])} 条新知识已写入 KG")
+
+    def do_route(self, arg):
+        """智能查询路由: route <查询>"""
+        query = arg.strip()
+        if not query:
+            print("  用法: route <查询>")
+            return
+        result = router.route(query)
+        print(f"\n  🧭 路由: \"{query}\" → {result['layer']}层"
+              f"{' (从精确降级)' if result.get('fallback_used') else ''}")
+
+        if result["layer"] == "exact":
+            for r in result["results"][:5]:
+                print(f"    · {r.key()} α={r.belief.alpha:.0f} β={r.belief.beta:.0f}")
+        elif result["layer"] == "semantic":
+            for key, sim, meta in result["results"][:5]:
+                print(f"    · {key} [{sim:.2f}]")
+        if result.get("bridge_insight"):
+            print(f"  🌉 桥接发现: {result['bridge_insight'][0] if result['bridge_insight'] else ''}")
 
     def do_provenance(self, arg):
         """来源审查: provenance <key>"""
