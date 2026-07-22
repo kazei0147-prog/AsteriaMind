@@ -34,49 +34,46 @@ class MathReasoner:
     """
 
     def solve(self, query: str) -> Optional[MathResult]:
-        """解析并求解数学问题。返回 None 如果无法处理。"""
+        """解析并求解。先算 → 再验证 → 失败则降置信度。"""
         q = query.strip()
+        result = None
 
-        # 微积分
-        result = self._derivative(q)
-        if result is not None:
-            return result
-        result = self._integral(q)
-        if result is not None:
-            return result
-        result = self._limit(q)
-        if result is not None:
-            return result
+        for method in [self._derivative, self._integral, self._limit,
+                       self._arithmetic, self._algebra, self._pattern,
+                       self._convert, self._sqrt, self._power]:
+            r = method(q)
+            if r:
+                result = r
+                break
 
-        # 四则运算
-        result = self._arithmetic(q)
-        if result is not None:
-            return result
+        if result is None:
+            return None
 
-        # 简单代数: "x + 5 = 10"
-        result = self._algebra(q)
-        if result is not None:
-            return result
+        # ── 验证: 把结果带回原方程 ──
+        v = self._verify(q, result)
+        if v["failed"]:
+            result.confidence -= v["penalty"]
+            result.steps.append(f"⚠ 验证失败: {v['reason']}")
+        return result
 
-        # 模式识别: "2, 4, 6, 8, ?"
-        result = self._pattern(q)
-        if result is not None:
-            return result
-
-        # 单位转换: "1 mile = ? km"
-        result = self._convert(q)
-        if result is not None:
-            return result
-
-        # 乘方/开方
-        result = self._sqrt(q)
-        if result is not None:
-            return result
-        result = self._power(q)
-        if result is not None:
-            return result
-
-        return None
+    def _verify(self, q: str, result) -> dict:
+        """代入结果验证: 等号左边代 x, 看是否等于右边"""
+        import re as _re
+        if 'x' not in q or '=' not in q:
+            return {"failed": False, "penalty": 0}
+        try:
+            parts = q.split('=')
+            lhs_expr = parts[0].strip()
+            rhs_val = float(parts[1].split()[0]) if parts[1].strip() else 0
+            x = result.result
+            lhs = self._eval_expr(lhs_expr.replace('x', f'({x})'))
+            if abs(lhs - rhs_val) > 0.1:
+                penalty = min(0.5, abs(lhs - rhs_val) / max(1, abs(rhs_val)))
+                return {"failed": True, "penalty": penalty,
+                        "reason": f"代入x={x:.4f}: {lhs_expr}={lhs:.4f}≠{rhs_val}"}
+        except Exception:
+            pass
+        return {"failed": False, "penalty": 0}
 
     def _arithmetic(self, q: str) -> Optional[MathResult]:
         """四则运算: 2 + 3 * 4, (5 - 2) / 3 等"""
