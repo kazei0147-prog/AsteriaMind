@@ -44,6 +44,7 @@ from AsteriaMind.falsification import (
     FalsificationController, SourceAuthorityTracker, WebSearchInterface,
 )
 from AsteriaMind.vector_layer import VectorLayer
+from AsteriaMind.human_review import HumanReviewInterface, ProvenanceGuard
 
 random.seed(42)
 
@@ -77,7 +78,8 @@ falsifier = FalsificationController()
 source_tracker = SourceAuthorityTracker()
 web_search = WebSearchInterface()
 vl = VectorLayer(dim=128)
-governance = TheoryGovernance(registry)
+provenance = ProvenanceGuard()
+reviewer = HumanReviewInterface(kg, provenance)
 
 # 预填充知识库 (AM 可以自己查)
 library.add_fact("物体A", "HAS", "属性X", 0.9)
@@ -179,7 +181,8 @@ class AsteriaShell(cmd.Cmd):
         if len(parts) >= 3:
             subj, pred, obj = parts[0], parts[1], parts[2]
             conf = float(parts[3]) if len(parts) > 3 else 0.7
-            kg.add(subj, pred, obj, confidence=conf)
+            rel = kg.add(subj, pred, obj, confidence=conf)
+            provenance.record_add(rel.key(), "user", conf)
             print(f"  ✅ 已学习: {subj} --[{pred}]--> {obj} (置信度 {conf})")
         else:
             print("  用法: learn <主体> <关系> <客体> [置信度]")
@@ -349,6 +352,33 @@ class AsteriaShell(cmd.Cmd):
         print(f"  🔗 发现 {len(pairs)} 对隐含关联 (向量相似但无直接边):")
         for a, b, sim in pairs[:5]:
             print(f"    {a[:40]} ↔ {b[:40]}  [{sim:.2f}]")
+
+    def do_review(self, arg):
+        """人类审核: review <key> correct|wrong|uncertain [原因]"""
+        parts = arg.split(None, 2)
+        if len(parts) < 2:
+            print("  用法: review <key> correct|wrong|uncertain [原因]")
+            return
+        key, action, *rest = parts[0], parts[1], (parts[2:] if len(parts) > 2 else [])
+        reason = rest[0] if rest else ""
+
+        result = ""
+        if action == "correct":
+            result = reviewer.review_correct(key)
+        elif action == "wrong":
+            result = reviewer.review_wrong(key, reason or "人工审核判定")
+        elif action == "uncertain":
+            result = reviewer.review_uncertain(key)
+        print(f"  {result}")
+
+    def do_provenance(self, arg):
+        """来源审查: provenance <key>"""
+        key = arg.strip()
+        if not key:
+            print("  用法: provenance <key>")
+            return
+        report = reviewer.provenance_report(key)
+        print(report)
 
     def do_search(self, arg):
         """网络搜索: search <查询词>"""
