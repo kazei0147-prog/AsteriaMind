@@ -142,3 +142,93 @@ class MetaHypothesisGenerator:
             confidence=conf,
             generation_round=round_num,
         )
+
+    def apply_to_framework(self, kg, meta_h: MetaHypothesis) -> bool:
+        """
+        将元假说转化为框架的实际扩展。
+
+        这是"改变认知框架"的真正执行:
+          不是记录一条日志说"我需要时序建模"
+          而是在假说生成管道中真的添加一个新的假说模板。
+        """
+        if meta_h.confidence < 0.4:
+            return False  # 不够确信, 不执行
+
+        # 根据元假说内容, 注册对应的扩展模板
+        if "时间" in meta_h.label or "时序" in meta_h.label:
+            kg.register_hypothesis_template({
+                "id": f"H7_TEMPORAL",
+                "label": "时序因果",
+                "mechanism": "时间条件",
+                "condition_fn": _temporal_condition,
+                "generate_fn": _temporal_generate,
+                "complexity": {"free_params": 2, "assumptions": 2, "base_cost": 0.08},
+            })
+            return True
+
+        if "反馈" in meta_h.label or "动态" in meta_h.label:
+            kg.register_hypothesis_template({
+                "id": f"H8_FEEDBACK",
+                "label": "反馈环",
+                "mechanism": "双向因果",
+                "condition_fn": _feedback_condition,
+                "generate_fn": _feedback_generate,
+                "complexity": {"free_params": 3, "assumptions": 3, "base_cost": 0.12},
+            })
+            return True
+
+        if "尺度" in meta_h.label or "非线性" in meta_h.label:
+            kg.register_hypothesis_template({
+                "id": f"H9_NONLINEAR",
+                "label": "非线性/尺度效应",
+                "mechanism": "阈值/规模依赖",
+                "condition_fn": _nonlinear_condition,
+                "generate_fn": _nonlinear_generate,
+                "complexity": {"free_params": 2, "assumptions": 2, "base_cost": 0.10},
+            })
+            return True
+
+        return False
+
+
+# ── 扩展假说模板的实现 (条件函数 + 生成函数) ──
+
+def _temporal_condition(kg, entity, sigs) -> bool:
+    """时序假说的触发条件: 图谱中有任何关系时触发"""
+    return len(kg.relations) >= 2
+
+def _temporal_generate(kg, entity, sigs):
+    return {
+        "label": f"时序效应: {entity} 的影响可能随时间变化——短期和长期效应不同",
+        "detail": "当前所有假说都假设静态关系, 但可能存在时间维度上的条件依赖",
+        "confidence": 0.15,
+        "prediction": "在不同时间窗口观测, 关系的强度或方向会改变",
+        "test": "时间分片对比",
+        "discrimination": "区别于静态假说: 预测关系在时间轴上不是均匀的",
+    }
+
+def _feedback_condition(kg, entity, sigs) -> bool:
+    return len(kg.relations) >= 2
+
+def _feedback_generate(kg, entity, sigs):
+    return {
+        "label": f"反馈环: {entity} 影响某物, 某物反过来也影响 {entity}",
+        "detail": "单向因果可能不完整, 存在未建模的反馈链路",
+        "confidence": 0.12,
+        "prediction": f"改变 {entity} 会影响下游节点, 下游节点的变化会反馈影响 {entity}",
+        "test": "格兰杰因果检验",
+        "discrimination": "区别于单向假说: 预测存在双向因果而非单箭头",
+    }
+
+def _nonlinear_condition(kg, entity, sigs) -> bool:
+    return len(kg.relations) >= 2
+
+def _nonlinear_generate(kg, entity, sigs):
+    return {
+        "label": f"非线性效应: {entity} 的影响可能有阈值——超过某点后效果突变",
+        "detail": "线性假说可能掩盖了非线性/尺度依赖的真实模式",
+        "confidence": 0.13,
+        "prediction": f"{entity} 的影响在低强度和高强度下显著不同",
+        "test": "分段回归/阈值检测",
+        "discrimination": "区别于线性假说: 预测关系不是均匀线性的",
+    }

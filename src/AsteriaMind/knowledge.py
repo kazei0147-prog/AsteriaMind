@@ -181,6 +181,17 @@ class KnowledgeGraph:
     def __init__(self):
         self.relations: list[Relation] = []
         self._index: dict[str, list[Relation]] = {}
+        # 可扩展假说注册表: 元假说可以通过 register_hypothesis_template() 添加新类型
+        self.hypothesis_extensions: list[dict] = []
+
+    def register_hypothesis_template(self, template: dict):
+        """
+        注册一个新的假说生成模板。
+
+        元假说层调用此方法来扩展假说框架本身。
+        模板格式: {id, label, mechanism, condition_fn, generate_fn, complexity}
+        """
+        self.hypothesis_extensions.append(template)
 
     # ── 写入 ──
 
@@ -392,6 +403,21 @@ class KnowledgeGraph:
                 },
             }
             result.append(h5)
+
+        # ── 可扩展假说: 元假说注册的自定义类型 ──
+        for ext in self.hypothesis_extensions:
+            try:
+                condition = ext.get("condition_fn")
+                generate = ext.get("generate_fn")
+                if condition and generate and condition(self, target_entity, sigs):
+                    h_custom = generate(self, target_entity, sigs)
+                    h_custom["id"] = ext["id"]
+                    h_custom["mechanism"] = ext.get("mechanism", "扩展")
+                    h_custom["complexity"] = ext.get("complexity",
+                        {"free_params": 1, "assumptions": 1, "base_cost": 0.05})
+                    result.append(h_custom)
+            except Exception:
+                pass
 
         # ── 奥卡姆剃刀: 重新打分, 惩罚复杂假说 ──
         result = self._apply_occam(result)

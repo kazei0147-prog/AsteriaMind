@@ -388,6 +388,12 @@ class AsteriaShell(cmd.Cmd):
             print(f"     🔧 建议: {mh.proposed_fix}")
             print(f"     置信度: {mh.confidence:.2f}")
 
+            # 元假说 → 改造假说框架
+            applied = mhg.apply_to_framework(kg, mh)
+            if applied:
+                print(f"     ⚡ 框架已扩展! 新增假说类型已注册到知识图谱。")
+                print(f"        下次探索将包含这个新类型的假说。")
+
         # ── Step 4: 采样 + 执行 ──
         print(f"\n  🧪 采样 20 个点...")
         pre_state = {}
