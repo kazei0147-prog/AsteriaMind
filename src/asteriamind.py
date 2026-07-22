@@ -53,11 +53,14 @@ from AsteriaMind.math_reasoner import MathReasoner
 from AsteriaMind.skill_library import SkillLibrary, build_default_skills
 from AsteriaMind.command_tool import CommandTool
 from AsteriaMind.active_learner import ActiveLearner
+from AsteriaMind.knowledge_db import KnowledgeDB
 
 random.seed(42)
 
 # ═══════════════ 初始化 ═══════════════
 kg = KnowledgeGraph()
+db = KnowledgeDB("asteriamind.db")
+print(f"  💾 数据库就绪: {db.count()} 条关系")
 wm = WorldModel()
 meta = MetaLearner(switch_r2_gap=0.03, check_interval=10)
 poly = PolyLearner(max_degree=5, upgrade_cooldown=6)
@@ -210,6 +213,7 @@ class AsteriaShell(cmd.Cmd):
             subj, pred, obj = parts[0], parts[1], parts[2]
             conf = float(parts[3]) if len(parts) > 3 else 0.7
             rel = kg.add(subj, pred, obj, confidence=conf)
+            db.add_relation(subj, pred, obj, conf, source="user")
             provenance.record_add(rel.key(), "user", conf)
             print(f"  ✅ 已学习: {subj} --[{pred}]--> {obj} (置信度 {conf})")
         else:
