@@ -1,0 +1,66 @@
+[
+  {
+    "key": "咖啡--[CAUSES]-->清醒",
+    "subject": "咖啡",
+    "predicate": "CAUSES",
+    "object": "清醒",
+    "alpha": 9.0,
+    "beta": 2.5,
+    "confidence": 0.782608695652174,
+    "source": "observed",
+    "counter_evidence": [
+      {
+        "context": "反证实验第1轮 (预算:100)",
+        "alternative": "系统审计触发的反设场景验证",
+        "time": 1784710475.952402
+      },
+      {
+        "context": "反证实验第2轮 (预算:95)",
+        "alternative": "系统审计触发的反设场景验证",
+        "time": 1784710475.9524105
+      },
+      {
+        "context": "反证实验第3轮 (预算:90)",
+        "alternative": "系统审计触发的反设场景验证",
+        "time": 1784710475.9524164
+      }
+    ],
+    "last_verified": 1784710509.3191068
+  },
+  {
+    "key": "茶--[CAUSES]-->清醒",
+    "subject": "茶",
+    "predicate": "CAUSES",
+    "object": "清醒",
+    "alpha": 8.0,
+    "beta": 1.9999999999999996,
+    "confidence": 0.8,
+    "source": "observed",
+    "counter_evidence": [],
+    "last_verified": 1784710509.319116
+  },
+  {
+    "key": "咖啡--[INCREASES]-->心率",
+    "subject": "咖啡",
+    "predicate": "INCREASES",
+    "object": "心率",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed",
+    "counter_evidence": [],
+    "last_verified": 1784710509.3191216
+  },
+  {
+    "key": "运动--[DECREASES]-->血压",
+    "subject": "运动",
+    "predicate": "DECREASES",
+    "object": "血压",
+    "alpha": 8.0,
+    "beta": 1.9999999999999996,
+    "confidence": 0.8,
+    "source": "observed",
+    "counter_evidence": [],
+    "last_verified": 1784710509.3191245
+  }
+]
