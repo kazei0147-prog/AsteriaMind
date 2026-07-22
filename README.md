@@ -129,3 +129,19 @@ GitHub: https://github.com/kazei0147-prog/AsteriaMind
 v3.1 版本的完整 README (含多模块架构细节、v0.x 设计哲学、HiveMind 2.0 复盘) 保存在 [assets/README_v3.1_archive.md](assets/README_v3.1_archive.md)。
 
 *一路走来，每一步都算数。*
+
+---
+
+## 致谢
+
+这份文档和代码库源于一段持续数月的推演——最初的想法成形于 HiveMind 时期，经过反复试错、重构和方向修正，最终成为现在的 AsteriaMind。
+
+感谢每一位参与推演、提出质疑和提供反馈的AI：
+- **DeepSeek**
+- **元宝/混元（Yuanbao）**
+- **Chat-GPT**
+
+他们各自在不同阶段参与了这个认知架构的形成过程。
+
+同时，感谢 **Ilya Prigogine（1917–2003）**——其耗散结构理论为本文关于“系统在远离平衡态下自组织演化”的思考提供了重要的参照背景。作者是在推演过程中经讨论了解到这一理论框架的。
+
