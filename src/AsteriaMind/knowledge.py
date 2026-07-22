@@ -176,13 +176,20 @@ class Relation:
 # ═══════════════════ 知识图谱 ═══════════════════
 
 class KnowledgeGraph:
-    """AsteriaMind 的脑内世界"""
+    """AsteriaMind 的脑内世界——带多键索引 + SQLite 持久化"""
 
-    def __init__(self):
+    def __init__(self, db_path: str = None):
         self.relations: list[Relation] = []
-        self._index: dict[str, list[Relation]] = {}
-        # 可扩展假说注册表: 元假说可以通过 register_hypothesis_template() 添加新类型
+        # 多键索引: (subject, predicate) → [Relation]
+        self._sp_index: dict[str, list[Relation]] = {}
+        # 主键索引: "subj--[pred]-->obj" → Relation
+        self._key_index: dict[str, Relation] = {}
+        # 可扩展假说注册表
         self.hypothesis_extensions: list[dict] = []
+        # 持久化路径
+        self.db_path = db_path
+        if db_path:
+            self._init_db()
 
     def register_hypothesis_template(self, template: dict):
         """
@@ -197,25 +204,132 @@ class KnowledgeGraph:
 
     def add(self, subject: str, predicate: str, object: str,
             confidence: float = 0.5, source: str = "observed") -> Relation:
-        """加入一条知识 (带初始置信度)"""
-        alpha = max(0.1, confidence * 10)  # 置信度 → Beta prior
+        """O(1) 索引写入——不再扫描全表"""
+        key = f"{subject}--[{predicate}]-->{object}"
+        alpha = max(0.1, confidence * 10)
         beta = max(0.1, (1 - confidence) * 10)
 
-        # 已存在? → 合并证据
-        for r in self.relations:
-            if r.subject == subject and r.predicate == predicate and r.object == object:
-                r.belief.alpha += alpha
-                r.belief.beta = max(0.1, (r.belief.beta + beta) / 2)
-                r.last_verified = time.time()
-                return r
+        # O(1) 主键查重
+        if key in self._key_index:
+            rel = self._key_index[key]
+            rel.belief.alpha += alpha
+            rel.belief.beta = max(0.1, (rel.belief.beta + beta) / 2)
+            rel.last_verified = time.time()
+            self._persist_rel(rel)
+            return rel
 
         rel = Relation(
             subject=subject, predicate=predicate, object=object,
             belief=Belief(alpha=alpha, beta=beta), source=source,
         )
         self.relations.append(rel)
-        self._index.setdefault(subject, []).append(rel)
+        self._key_index[key] = rel
+        spk = f"{subject}::{predicate}"
+        self._sp_index.setdefault(spk, []).append(rel)
+        self._persist_rel(rel)
         return rel
+
+    def observe(self, subject: str, predicate: str, object: str,
+                correct: bool = True, weight: float = 0.5,
+                context: str = "", alternative: str = "") -> Relation:
+        """更新 α/β: 支持证据加 α, 反证据加 β 并记录 counter_evidence"""
+        key = f"{subject}--[{predicate}]-->{object}"
+        rel = self._key_index.get(key)
+
+        if rel is None:
+            rel = self.add(subject, predicate, object,
+                           confidence=0.3, source="observed")
+
+        if correct:
+            rel.belief.alpha += weight
+        else:
+            rel.belief.beta += weight
+            if context or alternative:
+                rel.counter_evidence.append({
+                    "context": context, "alternative": alternative, "time": time.time(),
+                })
+
+        rel.last_verified = time.time()
+        self._persist_rel(rel)
+        return rel
+
+    # ── 持久化 ──
+
+    def _init_db(self):
+        if not self.db_path:
+            return
+        self._conn = __import__('sqlite3').connect(self.db_path)
+        self._conn.execute('''CREATE TABLE IF NOT EXISTS relations (
+            key TEXT PRIMARY KEY, subject TEXT, predicate TEXT, object TEXT,
+            alpha REAL, beta REAL, source TEXT,
+            counter_evidence TEXT, last_verified REAL
+        )''')
+        self._conn.commit()
+        self._load_from_db()
+
+    def _persist_rel(self, rel: Relation):
+        if not hasattr(self, '_conn'):
+            return
+        import json
+        self._conn.execute('''INSERT OR REPLACE INTO relations VALUES (?,?,?,?,?,?,?,?,?)''',
+                           (rel.key(), rel.subject, rel.predicate, rel.object,
+                            rel.belief.alpha, rel.belief.beta, rel.source,
+                            json.dumps(rel.counter_evidence, ensure_ascii=False),
+                            rel.last_verified))
+        self._conn.commit()
+
+    def _load_from_db(self):
+        import json
+        rows = self._conn.execute('SELECT * FROM relations').fetchall()
+        for row in rows:
+            key, subj, pred, obj, alpha, beta, source, ce_json, lv = row
+            rel = Relation(
+                subject=subj, predicate=pred, object=obj,
+                belief=Belief(alpha=alpha, beta=beta),
+                source=source, last_verified=lv or time.time(),
+            )
+            try:
+                rel.counter_evidence = json.loads(ce_json) if ce_json else []
+            except Exception:
+                rel.counter_evidence = []
+            self.relations.append(rel)
+            self._key_index[key] = rel
+            spk = f"{subj}::{pred}"
+            self._sp_index.setdefault(spk, []).append(rel)
+
+    def save(self, filepath: str = None):
+        """保存到 JSON 文件"""
+        path = filepath or "asteriamind_kg.json"
+        import json
+        data = [{
+            "key": r.key(), "subject": r.subject, "predicate": r.predicate,
+            "object": r.object, "alpha": r.belief.alpha, "beta": r.belief.beta,
+            "confidence": r.confidence, "source": r.source,
+            "counter_evidence": [
+                ce if isinstance(ce, dict) else {"context": ce.context,
+                    "alternative": ce.alternative, "time": ce.timestamp}
+                for ce in r.counter_evidence
+            ],
+            "last_verified": r.last_verified,
+        } for r in self.relations]
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load(cls, filepath: str) -> 'KnowledgeGraph':
+        """从 JSON 文件加载"""
+        import json
+        kg = cls()
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        for d in data:
+            rel = kg.add(d["subject"], d["predicate"], d["object"],
+                         confidence=d.get("confidence", 0.5),
+                         source=d.get("source", "loaded"))
+            rel.belief.alpha = d.get("alpha", rel.belief.alpha)
+            rel.belief.beta = d.get("beta", rel.belief.beta)
+            rel.counter_evidence = d.get("counter_evidence", [])
+        return kg
 
     def learn_from(self, relations: list[tuple]):
         """批量学习"""
@@ -728,14 +842,24 @@ class KnowledgeGraph:
     # ── 查询 ──
 
     def query(self, subject: str, predicate: str = None) -> list[Relation]:
+        """O(1) 索引查询: 先按 (subject, predicate) 查, 补充 object 匹配"""
         results = []
-        for r in self.relations:
-            if r.subject == subject:
-                if predicate is None or r.predicate == predicate:
-                    results.append(r)
-            elif r.object == subject:
-                if predicate is None:
-                    results.append(r)
+        # 按 subject 精确索引
+        if predicate:
+            spk = f"{subject}::{predicate}"
+            if spk in self._sp_index:
+                results = list(self._sp_index[spk])
+        # 按 key 前缀扫描 (O(n) 但 n 是索引键数, 比全表小得多)
+        if not results:
+            prefix = f"{subject}--["
+            for key, rel in self._key_index.items():
+                if key.startswith(prefix) and (predicate is None or f"--[{predicate}]-->" in key):
+                    results.append(rel)
+        # 补充: subject 作为 object 出现的关系
+        for key, rel in self._key_index.items():
+            if key.endswith(f"]-->{subject}") and (predicate is None):
+                if rel not in results:
+                    results.append(rel)
         return sorted(results, key=lambda r: -r.confidence)
 
     def ask(self, question: str) -> Optional[dict]:
