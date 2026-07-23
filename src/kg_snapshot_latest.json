@@ -495,6 +495,15 @@
     "source": "observed"
   },
   {
+    "subject": "我",
+    "predicate": "MEANS",
+    "object": "一个喜欢学习的 AI",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
     "subject": "搜索",
     "predicate": "IS_SYNONYM",
     "object": "查找",
@@ -669,9 +678,9 @@
     "subject": "猫",
     "predicate": "IS_A",
     "object": "哺乳动物",
-    "alpha": 35.0,
+    "alpha": 42.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.9210526315789473,
+    "confidence": 0.9333333333333333,
     "source": "observed"
   },
   {
@@ -1131,15 +1140,6 @@
     "alpha": 3.0,
     "beta": 7.0,
     "confidence": 0.3,
-    "source": "observed"
-  },
-  {
-    "subject": "我",
-    "predicate": "MEANS",
-    "object": "一个喜欢学习的 AI",
-    "alpha": 8.5,
-    "beta": 1.5000000000000002,
-    "confidence": 0.85,
     "source": "observed"
   }
 ]

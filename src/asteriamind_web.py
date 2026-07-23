@@ -667,6 +667,23 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if any(w in text for w in ('好吧', '嗯嗯', '哦哦', '嗯', '好')):
             return (["嗯!", "好的~", "继续说吧!"][hash(text) % 3], "ack")
 
+        # ── 知识缺口: "你了解X吗"/"你知道X吗"/"X是什么" ──
+        import re as _re
+        m = _re.search(r'(?:了解|知道|懂|认识)(.+)', text)
+        if m:
+            topic = m.group(1).strip().rstrip('吗?？') or text
+            # 查 KG
+            for r in kg.relations:
+                if r.subject in topic or topic in r.object:
+                    return (f"我知道一点: {r.subject} --[{r.predicate}]--> {r.object}", "kg_hint")
+            return (f"我还不太了解「{topic}」😅 你能教我吗? 比如 '{topic}是X'", "knowledge_gap")
+        # 纯名词: "塔罗牌" / "黑洞"
+        if _re.match(r'^[\u4e00-\u9fff\w]{2,10}$', text):
+            for r in kg.relations:
+                if r.subject == text:
+                    return (f"我知道 {text}: {r.predicate} {r.object}", "kg_hint")
+            return (f"「{text}」? 还不太了解呢。你能教我吗?", "knowledge_gap")
+
         # 兜底——不再是一句死话
         defaults = [
             "我记下了。试试更具体地说? 比如 '太阳是恒星'",
