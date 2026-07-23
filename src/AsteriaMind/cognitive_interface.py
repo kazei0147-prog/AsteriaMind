@@ -691,7 +691,7 @@ class CognitiveInterface:
             subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
             if subj and pred and obj:
                 # 同时存向量痕迹 + KG (双写过渡期)
-                self.vector_store.store(subj, pred, obj, "confirmed")
+                self.vector_store.store(subj, pred, obj, "confirmed", text)
                 if self.kg and self.db:
                     self.kg.add(subj, pred, obj, confidence=0.7)
                     self.db.add_relation(subj, pred, obj, 0.7, source="web")
@@ -703,24 +703,9 @@ class CognitiveInterface:
                 if sem:
                     s = sem.structure
                     subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
-                    # 星图查询: 用向量检索预测反馈
-                    from AsteriaMind.emergent_vector_store import cognitive_query
-                    cq = cognitive_query(self.vector_store, text, subj, pred, obj)
-                    pred_fb = cq["predicted"]
-                    conf = cq["confidence"]
-                    evidence = cq["top_evidence"]
-
-                    if pred_fb == "confirmed" and conf > 0.3:
-                        lines = ["基于认知痕迹推测:"]
-                        if evidence:
-                            lines.append(f"  · 近邻: {evidence[0].get('subj','?')} → {evidence[0].get('obj','?')} (相似{evidence[0].get('similarity',0):.0%})")
-                            if len(evidence) > 1:
-                                lines.append(f"  · 近邻: {evidence[1].get('subj','?')} → {evidence[1].get('obj','?')} (相似{evidence[1].get('similarity',0):.0%})")
-                        lines.append(f"  ⇒ 推测 {subj} {pred} {obj} 成立 (置信{conf:.0%})")
-                        return "\n".join(lines)
-                    elif pred_fb == "corrected" and conf > 0.3:
-                        return f"根据已有认知, {subj} 可能不是 {obj} (置信{conf:.0%})"
-                    return f"关于 {subj} 和 {obj} 的关系, 我还不确定 (置信{conf:.0%})。你能教我吗?"
+                    # 统一星图查询: 认知 + 语言同时检索
+                    er = self.vector_store.emergent_reply(text, subj, pred, obj)
+                    return er["reply"]
 
             if prag.type == "self_directed":
                 facts = self.db.count() if self.db else 0
