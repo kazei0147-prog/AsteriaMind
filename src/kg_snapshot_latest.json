@@ -324,6 +324,123 @@
     "source": "observed"
   },
   {
+    "subject": "is",
+    "predicate": "MEANS",
+    "object": "copula verb, same as Chinese 是",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "can",
+    "predicate": "MEANS",
+    "object": "auxiliary verb, shows ability not cause",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "a",
+    "predicate": "MEANS",
+    "object": "article, not part of object meaning",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "an",
+    "predicate": "MEANS",
+    "object": "article, not part of object meaning",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "the",
+    "predicate": "MEANS",
+    "object": "article, not part of object meaning",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "orbits",
+    "predicate": "MEANS",
+    "object": "relation verb, means revolves around",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "causes",
+    "predicate": "MEANS",
+    "object": "relation verb, means leads to",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "belongs",
+    "predicate": "MEANS",
+    "object": "relation verb, means is part of",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "is",
+    "predicate": "MEANS",
+    "object": "copula verb",
+    "alpha": 25.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.9444444444444444,
+    "source": "observed"
+  },
+  {
+    "subject": "can",
+    "predicate": "MEANS",
+    "object": "auxiliary verb",
+    "alpha": 25.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.9444444444444444,
+    "source": "observed"
+  },
+  {
+    "subject": "a",
+    "predicate": "MEANS",
+    "object": "article",
+    "alpha": 17.0,
+    "beta": 1.5000000000000002,
+    "confidence": 0.918918918918919,
+    "source": "observed"
+  },
+  {
+    "subject": "orbits",
+    "predicate": "MEANS",
+    "object": "relation verb",
+    "alpha": 25.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.9444444444444444,
+    "source": "observed"
+  },
+  {
+    "subject": "causes",
+    "predicate": "MEANS",
+    "object": "relation verb",
+    "alpha": 25.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.9444444444444444,
+    "source": "observed"
+  },
+  {
     "subject": "搜索",
     "predicate": "IS_SYNONYM",
     "object": "查找",
@@ -588,27 +705,27 @@
     "subject": "cat",
     "predicate": "IS_A",
     "object": "animal",
-    "alpha": 14.0,
+    "alpha": 21.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.8235294117647058,
+    "confidence": 0.875,
     "source": "observed"
   },
   {
     "subject": "dog",
     "predicate": "IS_A",
     "object": "mammal",
-    "alpha": 14.0,
+    "alpha": 21.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.8235294117647058,
+    "confidence": 0.875,
     "source": "observed"
   },
   {
     "subject": "earth",
     "predicate": "ORBITS",
     "object": "sun",
-    "alpha": 7.0,
+    "alpha": 14.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.7,
+    "confidence": 0.8235294117647058,
     "source": "observed"
   },
   {
@@ -624,9 +741,9 @@
     "subject": "fire",
     "predicate": "CAUSES",
     "object": "heat",
-    "alpha": 7.0,
+    "alpha": 14.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.7,
+    "confidence": 0.8235294117647058,
     "source": "observed"
   },
   {
@@ -768,9 +885,9 @@
     "subject": "bird",
     "predicate": "CAN",
     "object": "fly",
-    "alpha": 12.0,
+    "alpha": 18.0,
     "beta": 4.0,
-    "confidence": 0.75,
+    "confidence": 0.8181818181818182,
     "source": "observed"
   },
   {

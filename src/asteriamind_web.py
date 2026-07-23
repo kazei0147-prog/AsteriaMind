@@ -267,11 +267,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             _auto_export()
             return (f"✅ 记住了: 以后你说 '{condition}' 我就回 '{action}'", "learn_pref")
 
-        # ── 英文模式: ASCII 占比 > 60% → 走英文解析 ──
-        ascii_count = sum(1 for c in text if ord(c) < 128)
-        if ascii_count > len(text) * 0.6:
-            return self._process_en(text)
-
         # ── 1. 数学优先: 含数字+运算符或明确求值词 ──
         if re.search(r'\d\s*[\+\-\*/\^]\s*\d', text) or any(kw in text for kw in ['等于多少', '算一下', '是多少等于']):
             m = skill_lib.best_match(text)
@@ -328,6 +323,46 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         # ── 5. 事实陈述——多句型解析 (去掉了 ^ 开头限制!) ──
         learned = []  # 本轮学到的所有事实
+
+        # ── KG 词性扩展: 英语句子用 KG 里学的词性来解析 ──
+        en_words = text.lower().split() if any(ord(c) < 128 for c in text[:20]) else []
+        for w in en_words:
+            wtype = self._lookup_word_type(w)
+            if wtype:
+                if "copula" in wtype.lower() or "linking" in wtype.lower():
+                    idx = text.lower().find(w)
+                    if idx > 0:
+                        subj = text[:idx].strip()
+                        obj = text[idx + len(w):].strip()
+                        for art in ('a ', 'an ', 'the '):
+                            if obj.lower().startswith(art):
+                                obj = obj[len(art):].strip()
+                        if subj and obj:
+                            kg.add(subj, "IS_A", obj, confidence=0.7)
+                            db.add_relation(subj, "IS_A", obj, 0.7, source="kg_grammar")
+                            _auto_export()
+                            return (f"✅ Learned: {subj} is a {obj} (KG词性: {w} IS copula_verb)", "learn_fact")
+                if "auxiliary" in wtype.lower() or "ability" in wtype.lower():
+                    idx = text.lower().find(w)
+                    if idx > 0:
+                        subj = text[:idx].strip()
+                        obj = text[idx + len(w):].strip()
+                        if subj and obj:
+                            kg.add(subj, "CAN", obj, confidence=0.6)
+                            db.add_relation(subj, "CAN", obj, 0.6, source="kg_grammar")
+                            _auto_export()
+                            return (f"✅ Learned: {subj} can {obj} (KG词性: {w} IS auxiliary_verb)", "learn_can")
+                if "relation" in wtype.lower() and w not in ("is", "are", "can", "a", "an", "the"):
+                    idx = text.lower().find(w)
+                    if idx > 0:
+                        subj = text[:idx].strip()
+                        obj = text[idx + len(w):].strip()
+                        pred = w.upper()
+                        if subj and obj:
+                            kg.add(subj, pred, obj, confidence=0.7)
+                            db.add_relation(subj, pred, obj, 0.7, source="kg_grammar")
+                            _auto_export()
+                            return (f"✅ Learned: {subj} {pred} {obj} (KG词性: {w} IS relation_verb)", "learn_fact")
 
         # 先按中文分隔符拆句: 逗号/分号/句号/也/和/还/然后
         clauses = re.split(r'[，,；;。]|(?<=[\u4e00-\u9fff])(?:也|还|和|然后|而且)(?=[\u4e00-\u9fff])', text)
@@ -425,100 +460,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         # ── 6. 默认: 对话回复 ──
         return self._conversational_reply(text)
-
-    def _process_en(self, text: str) -> tuple[str, str]:
-        """English parsing — space-delimited, less ambiguous"""
-        t = text.strip()
-        tl = t.lower()
-
-        # ── Questions (CHECED FIRST, before any fact pattern) ──
-        is_question = ('?' in t or tl.startswith(('what', 'who', 'how', 'where', 'when', 'why'))
-                       or tl.startswith('is ') or tl.startswith('are ')
-                       or tl.startswith('can ') or tl.startswith('does ')
-                       or tl.startswith('do ') or 'tell me what' in tl or 'tell me who' in tl
-                       or tl.startswith('could ') or tl.startswith('would '))
-
-        if is_question:
-            # Clean up
-            clean = t.rstrip('?.!').lower()
-            words = [w for w in clean.split() if w not in
-                     ('what', 'who', 'is', 'are', 'a', 'an', 'the', 'can', 'you',
-                      'tell', 'me', 'of', 'does', 'do', 'how', 'where', 'when', 'why',
-                      'could', 'would', 'please', 'to')]
-            for w in words:
-                for r in kg.relations:
-                    if r.subject.lower() == w:
-                        return (f"{r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})", "en_query")
-            return ("I don't know that yet. Try teaching me!", "en_unknown")
-
-        m = re.search(r'(\w[\w\s]{0,30}?)\s+is\s+(?:a\s+|an\s+)?(\w[\w\s]{0,30}?)$', t, re.I)
-        if m:
-            subj, obj = m.group(1).strip(), m.group(2).strip()
-            if subj.lower() in ('it', 'this', 'that', 'he', 'she', 'i', 'you'): return ("I'm listening!", "en_ack")
-            kg.add(subj, "IS_A", obj, confidence=0.7)
-            db.add_relation(subj, "IS_A", obj, 0.7, source="en")
-            _auto_export()
-            return (f"Got it: {subj} is a {obj}", "learn_fact")
-
-        m = re.search(r'(\w[\w\s]{0,30}?)\s+can\s+(\w[\w\s]{0,30}?)$', t, re.I)
-        if m:
-            subj, obj = m.group(1).strip(), m.group(2).strip()
-            kg.add(subj, "CAN", obj, confidence=0.6)
-            db.add_relation(subj, "CAN", obj, 0.6, source="en")
-            _auto_export()
-            return (f"Got it: {subj} can {obj}", "learn_can")
-
-        for pat, pred in [
-            (r'(\w[\w\s]{0,30}?)\s+causes?\s+(\w[\w\s]{0,30}?)$', 'CAUSES'),
-            (r'(\w[\w\s]{0,30}?)\s+orbits?\s+(\w[\w\s]{0,30}?)$', 'ORBITS'),
-            (r'(\w[\w\s]{0,30}?)\s+belongs?\s+to\s+(\w[\w\s]{0,30}?)$', 'BELONGS_TO'),
-            (r'(\w[\w\s]{0,30}?)\s+includes?\s+(\w[\w\s]{0,30}?)$', 'INCLUDES'),
-        ]:
-            m = re.search(pat, t, re.I)
-            if m:
-                subj, obj = m.group(1).strip(), m.group(2).strip()
-                kg.add(subj, pred, obj, confidence=0.7)
-                db.add_relation(subj, pred, obj, 0.7, source="en")
-                _auto_export()
-                return (f"Got it: {subj} {pred} {obj}", "learn_fact")
-
-        return ("I heard you. Try: 'cat is animal' / 'bird can fly'?", "en_casual")
-
-    def _conversational_reply(self, text: str) -> tuple[str, str]:
-        """对话回复——用户教的偏好优先, 再默认"""
-        # 1. 查用户教的偏好 — 词级匹配 (避免"你"字符误匹配)
-        for r in kg.relations:
-            if r.predicate == "REPLIES_WITH":
-                pref = r.subject
-                # 精确: 偏好词出现在文本中, 或文本词出现在偏好中(双字以上)
-                if pref in text:
-                    return (r.object, "pref_reply")
-                # 反向: 文本中的2字以上词在偏好里
-                for ch in re.findall(r'[\u4e00-\u9fff]{2,}', text):
-                    if ch in pref and len(ch) >= 2:
-                        return (r.object, "pref_reply")
-        # 2. 同义词展开
-        for r in kg.relations:
-            if r.predicate == "IS_SYNONYM" and r.subject in text:
-                for r2 in kg.relations:
-                    if r2.subject == r.object and r2.predicate == "MEANS":
-                        return (f"💡 '{r.subject}' 就是 '{r.object}' → {r2.object}", "synonym")
-        # 3. 默认
-        if '你好' in text or 'hello' in text.lower():
-            return ("你好! 有什么想告诉我的吗?", "greeting")
-        if '你是谁' in text or '你叫什么' in text:
-            return (["我是 AsteriaMind, 一个不断进化的认知系统 🧠", "我叫 AsteriaMind! 是你在培养的 AI。", "我是你一手带大的 AsteriaMind 呀~"][hash(text) % 3], "intro")
-        if '你能做什么' in text or '你会什么' in text:
-            return ("我可以: 学习事实 / 回答提问 / 做数学题 / 搜索信息 / 自己进化。试试告诉我点什么?", "capabilities")
-        if '怎么用' in text or '如何用' in text:
-            return ("很简单: 'X是Y' 教事实, 'X会Y吗' 问问题, '2+3=?' 算数学, 'learnw X' 学单词, 'readcn 文本' 读中文", "howto")
-        # 默认: 多样化提示
-        defaults = [
-            "我记下了。试试更具体地说? 比如 '鸟是动物' 或 '太阳会发光'",
-            "嗯嗯。想告诉我什么知识吗?",
-            "收到! 你可以教我任何事 😊",
-        ]
-        return (defaults[hash(text) % len(defaults)], "casual")
 
     def _cmd_learn_word(self, word: str) -> tuple[str, str]:
         """learnw: 学习一个词"""
@@ -647,6 +588,38 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                          for r in found[:5]]
                 return (f"关于 '{kw}' 我知道:\n" + "\n".join(lines), "kg_query")
         return (f"我不确定。试试告诉我: '{text[:6] if len(text)>6 else text}' 是什么?", "unknown")
+
+    def _lookup_word_type(self, word: str) -> str:
+        """查 KG: 这个词是什么词性？"""
+        for r in kg.relations:
+            if r.subject == word and r.predicate in ("MEANS", "IS_A"):
+                return r.object
+        return ""
+
+    def _conversational_reply(self, text: str) -> tuple[str, str]:
+        """对话回复——用户教的偏好优先, 再默认"""
+        for r in kg.relations:
+            if r.predicate == "REPLIES_WITH":
+                pref = r.subject
+                if pref in text:
+                    return (r.object, "pref_reply")
+                for ch in re.findall(r'[\u4e00-\u9fff]{2,}', text):
+                    if ch in pref and len(ch) >= 2:
+                        return (r.object, "pref_reply")
+        for r in kg.relations:
+            if r.predicate == "IS_SYNONYM" and r.subject in text:
+                for r2 in kg.relations:
+                    if r2.subject == r.object and r2.predicate == "MEANS":
+                        return (f"💡 '{r.subject}' = '{r.object}' → {r2.object}", "synonym")
+        if '你好' in text or 'hello' in text.lower():
+            replies = ["你好! 我是 AsteriaMind 🌻", "嗨! 我在呢。", "在呢! 说吧。"]
+            return (replies[hash(text) % len(replies)], "greeting")
+        if '你是谁' in text:
+            return ("我是 AsteriaMind, 一个不断进化的认知系统 🧠", "intro")
+        if '谢谢' in text:
+            return (["不客气 🙂", "没事!", "随时效劳~"][hash(text) % 3], "thanks")
+        defaults = ["我记下了。试试更具体地说?", "嗯嗯。想告诉我什么知识吗?", "收到! 你可以教我任何事 😊"]
+        return (defaults[hash(text) % len(defaults)], "casual")
 
 
 if __name__ == "__main__":
