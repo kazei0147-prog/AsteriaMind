@@ -13,9 +13,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from collections import deque
 
-# ── 对话上下文: 每个会话保留最近 5 轮 ──
-SESSION_CONTEXT: dict[str, list[str]] = {}  # ip -> [last topics]
-MAX_CONTEXT = 5
+# ── 持久对话记忆 (SQLite 后端, 不限长度) ──
+CONV_MEMORY = None  # ConversationMemory instance, late init
 
 SNAPSHOT_PATH = "kg_snapshot_latest.json"
 
@@ -41,10 +40,12 @@ from AsteriaMind.math_reasoner import MathReasoner
 from AsteriaMind.skill_library import build_default_skills
 from AsteriaMind.knowledge_db import KnowledgeDB
 from AsteriaMind.falsification import WebSearchInterface
+from AsteriaMind.conversation_memory import ConversationMemory
 
 # ── AM 初始化 ──
 kg = KnowledgeGraph()
 db = KnowledgeDB("asteriamind.db")
+CONV_MEMORY = ConversationMemory(db)
 reg = TemplateRegistry()
 for t in _builtin_templates(): reg.register(t)
 skill_lib = build_default_skills()
@@ -220,18 +221,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"reply": "请说点什么", "error": True})
                 return
 
-            # ── 对话上下文 ──
-            sid = self.client_address[0]  # IP 作为简易会话 ID
-            if sid not in SESSION_CONTEXT:
-                SESSION_CONTEXT[sid] = deque(maxlen=MAX_CONTEXT)
-            context = list(SESSION_CONTEXT[sid])
-
-            reply, action = self._process(text, context=context)
-
-            # 记住本轮话题
+            # ── 持久对话上下文 ──
+            sid = self.client_address[0]
             topic = self._extract_topic(text)
-            if topic:
-                SESSION_CONTEXT[sid].append(topic)
+            CONV_MEMORY.add(sid, "user", text, topic)
+            context_str = CONV_MEMORY.get_context_string(sid, text)
+
+            reply, action = self._process(text, context=context_str)
+
+            CONV_MEMORY.add(sid, "am", reply, topic)
 
             self._json({
                 "reply": reply, "action": action,
@@ -275,7 +273,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 return w
         return ""
 
-    def _process(self, text: str, context: list[str] = None) -> tuple[str, str]:
+    def _process(self, text: str, context: str = None) -> tuple[str, str]:
         """处理自然语言——命令路由 + 意图分类 + 上下文感知"""
 
         # ── 0. 教学命令路由 (优先级最高) ──
@@ -654,20 +652,18 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 return r.object
         return ""
 
-    def _conversational_reply(self, text: str, context: list[str] = None) -> tuple[str, str]:
-        """对话回复——从 KG 取身份, 不再硬编码"""
-        # 代词解析: "它/这/那" → 最近话题词(不级联)
+    def _conversational_reply(self, text: str, context: str = "") -> tuple[str, str]:
+        """对话回复——从 KG 取身份, 用上下文增强"""
+        # 代词解析: 从上下文中提取最近话题
+        resolved = text
         if context:
-            for w in ('它', '他', '她'):
-                if w in text:
-                    for prev in reversed(context):
-                        # 只取话题词本身, 不用前一轮的完整句子
-                        if prev and len(prev) >= 2 and prev not in ('它','他','她'):
-                            resolved_text = text.replace(w, prev)
-                            # 重新走完整处理流程 (但不带 context 避免循环)
-                            reply, action = self._process(resolved_text, context=None)
-                            return (reply, action)
-                    break
+            topics = re.findall(r'Topic chain: (.+)', context)
+            if topics:
+                last = topics[0].split('→')[-1].strip()
+                for w in ('它', '他', '她'):
+                    if w in text and last and last not in ('它','他','她'):
+                        resolved_text = text.replace(w, last)
+                        return self._process(resolved_text, context=None)
 
         # 偏好优先
         for r in kg.relations:
@@ -734,10 +730,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if r.subject == text:
                     return (f"我知道 {text}: {r.predicate} {r.object}", "kg_hint")
             # 检查上下文: 刚才是不是在聊这个
-            if context:
-                for prev_topic in reversed(context):
-                    if prev_topic in text or text in prev_topic:
-                        return (f"嗯, 我们刚聊到「{prev_topic}」呢。你对它有什么想说的?", "context_match")
+            if context and text in context:
+                return (f"嗯, 我们刚聊到这个呢。你对它有什么想说的?", "context_match")
             return (f"「{text}」? 还不太了解呢。你能教我吗?", "knowledge_gap")
 
         # 兜底——不再是一句死话
