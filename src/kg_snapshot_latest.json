@@ -3,9 +3,9 @@
     "subject": "地球",
     "predicate": "IS_A",
     "object": "行星",
-    "alpha": 58.5,
-    "beta": 2.9804687500000004,
-    "confidence": 0.9515216976936273,
+    "alpha": 86.5,
+    "beta": 2.9987792968750004,
+    "confidence": 0.9664936290703162,
     "source": "observed"
   },
   {
@@ -678,9 +678,9 @@
     "subject": "猫",
     "predicate": "IS_A",
     "object": "哺乳动物",
-    "alpha": 42.0,
+    "alpha": 70.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.9333333333333333,
+    "confidence": 0.958904109589041,
     "source": "observed"
   },
   {
@@ -894,6 +894,15 @@
     "subject": "fish",
     "predicate": "DOES",
     "object": "swims",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "塔罗牌",
+    "predicate": "IS_A",
+    "object": "占卜工具",
     "alpha": 7.0,
     "beta": 3.0000000000000004,
     "confidence": 0.7,
@@ -1140,15 +1149,6 @@
     "alpha": 3.0,
     "beta": 7.0,
     "confidence": 0.3,
-    "source": "observed"
-  },
-  {
-    "subject": "塔罗牌",
-    "predicate": "IS_A",
-    "object": "占卜工具",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
     "source": "observed"
   }
 ]
