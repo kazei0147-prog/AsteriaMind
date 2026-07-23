@@ -597,6 +597,9 @@ class CognitiveInterface:
         self.semantic = SemanticHypothesisEngine(kg, db)
         self.pragmatic = PragmaticIntentEngine(kg)
         self.action = ActionIntentEngine()
+        # EmergentVectorStore: 反馈驱动的认知痕迹 (替代硬标签符号)
+        from AsteriaMind.emergent_vector_store import EmergentVectorStore
+        self.vector_store = EmergentVectorStore()
 
         # 注册: 已学到的语言原语
         self._load_kg_primitives()
@@ -682,29 +685,42 @@ class CognitiveInterface:
         sem = result.get("semantic")
         prag = result.get("pragmatic")
 
-        # 事实学习——存 KG
+        # 事实学习——存星图 (不再依赖硬标签)
         if action == "fact_learn" and sem:
             s = sem.structure
             subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
-            if subj and pred and obj and self.kg and self.db:
-                self.kg.add(subj, pred, obj, confidence=0.7)
-                self.db.add_relation(subj, pred, obj, 0.7, source="web")
-            return f"✅ 学会了: {subj} {pred} {obj}"
+            if subj and pred and obj:
+                # 同时存向量痕迹 + KG (双写过渡期)
+                self.vector_store.store(subj, pred, obj, "confirmed")
+                if self.kg and self.db:
+                    self.kg.add(subj, pred, obj, confidence=0.7)
+                    self.db.add_relation(subj, pred, obj, 0.7, source="web")
+                traces = self.vector_store.count()
+            return f"✅ 学会了: {subj} {pred} {obj}\n💫 星图已归档 ({traces} 条认知痕迹)"
 
         if prag:
             if prag.type == "info_request":
                 if sem:
                     s = sem.structure
-                    subj = s.get("subject")
-                    kg_hits = []
-                    if self.kg and subj:
-                        for r in self.kg.relations:
-                            if r.subject == subj and r.confidence > 0.5:
-                                kg_hits.append(r)
-                    if kg_hits:
-                        lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object}" for r in kg_hits[:5]]
-                        return "我找到这些:\n" + "\n".join(lines)
-                    return f"关于 {subj} 我还不知道。你能教我吗?"
+                    subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
+                    # 星图查询: 用向量检索预测反馈
+                    from AsteriaMind.emergent_vector_store import cognitive_query
+                    cq = cognitive_query(self.vector_store, text, subj, pred, obj)
+                    pred_fb = cq["predicted"]
+                    conf = cq["confidence"]
+                    evidence = cq["top_evidence"]
+
+                    if pred_fb == "confirmed" and conf > 0.3:
+                        lines = ["基于认知痕迹推测:"]
+                        if evidence:
+                            lines.append(f"  · 近邻: {evidence[0].get('subj','?')} → {evidence[0].get('obj','?')} (相似{evidence[0].get('similarity',0):.0%})")
+                            if len(evidence) > 1:
+                                lines.append(f"  · 近邻: {evidence[1].get('subj','?')} → {evidence[1].get('obj','?')} (相似{evidence[1].get('similarity',0):.0%})")
+                        lines.append(f"  ⇒ 推测 {subj} {pred} {obj} 成立 (置信{conf:.0%})")
+                        return "\n".join(lines)
+                    elif pred_fb == "corrected" and conf > 0.3:
+                        return f"根据已有认知, {subj} 可能不是 {obj} (置信{conf:.0%})"
+                    return f"关于 {subj} 和 {obj} 的关系, 我还不确定 (置信{conf:.0%})。你能教我吗?"
 
             if prag.type == "self_directed":
                 facts = self.db.count() if self.db else 0
