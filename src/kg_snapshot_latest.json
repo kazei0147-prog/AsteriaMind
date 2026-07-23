@@ -288,6 +288,42 @@
     "source": "observed"
   },
   {
+    "subject": "会",
+    "predicate": "MEANS",
+    "object": "助动词,表示能力,不是因果关系",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "能",
+    "predicate": "MEANS",
+    "object": "助动词,表示可能性",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "是",
+    "predicate": "MEANS",
+    "object": "系动词,连接主语和说明",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
+    "subject": "在",
+    "predicate": "MEANS",
+    "object": "介词,表示位置",
+    "alpha": 8.5,
+    "beta": 1.5000000000000002,
+    "confidence": 0.85,
+    "source": "observed"
+  },
+  {
     "subject": "搜索",
     "predicate": "IS_SYNONYM",
     "object": "查找",
@@ -639,6 +675,33 @@
     "source": "observed"
   },
   {
+    "subject": "星星",
+    "predicate": "CAN",
+    "object": "发光",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "火",
+    "predicate": "CAN",
+    "object": "烧水",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "水",
+    "predicate": "CAN",
+    "object": "灭火",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
     "subject": "我指",
     "predicate": "APPEARED_IN",
     "object": "我指着对方说了一句话",
@@ -747,63 +810,72 @@
     "source": "observed"
   },
   {
-    "subject": "会",
-    "predicate": "MEANS",
-    "object": "助动词,表示能力,不是因果关系",
-    "alpha": 8.5,
-    "beta": 1.5000000000000002,
-    "confidence": 0.85,
+    "subject": "cat",
+    "predicate": "IS_A",
+    "object": "animal",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
     "source": "observed"
   },
   {
-    "subject": "能",
-    "predicate": "MEANS",
-    "object": "助动词,表示可能性",
-    "alpha": 8.5,
-    "beta": 1.5000000000000002,
-    "confidence": 0.85,
+    "subject": "dog",
+    "predicate": "IS_A",
+    "object": "mammal",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
     "source": "observed"
   },
   {
-    "subject": "是",
-    "predicate": "MEANS",
-    "object": "系动词,连接主语和说明",
-    "alpha": 8.5,
-    "beta": 1.5000000000000002,
-    "confidence": 0.85,
-    "source": "observed"
-  },
-  {
-    "subject": "在",
-    "predicate": "MEANS",
-    "object": "介词,表示位置",
-    "alpha": 8.5,
-    "beta": 1.5000000000000002,
-    "confidence": 0.85,
-    "source": "observed"
-  },
-  {
-    "subject": "星星",
+    "subject": "bird",
     "predicate": "CAN",
-    "object": "发光",
+    "object": "fly",
     "alpha": 6.0,
     "beta": 4.0,
     "confidence": 0.6,
     "source": "observed"
   },
   {
-    "subject": "火",
-    "predicate": "CAN",
-    "object": "烧水",
-    "alpha": 6.0,
-    "beta": 4.0,
-    "confidence": 0.6,
+    "subject": "earth",
+    "predicate": "ORBITS",
+    "object": "sun",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
     "source": "observed"
   },
   {
-    "subject": "水",
+    "subject": "moon",
+    "predicate": "ORBITS",
+    "object": "earth",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "fire",
+    "predicate": "CAUSES",
+    "object": "heat",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "gold",
+    "predicate": "BELONGS_TO",
+    "object": "metal",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "fish",
     "predicate": "CAN",
-    "object": "灭火",
+    "object": "swim",
     "alpha": 6.0,
     "beta": 4.0,
     "confidence": 0.6,

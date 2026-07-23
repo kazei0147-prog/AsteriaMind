@@ -267,6 +267,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             _auto_export()
             return (f"✅ 记住了: 以后你说 '{condition}' 我就回 '{action}'", "learn_pref")
 
+        # ── 英文模式: ASCII 占比 > 60% → 走英文解析 ──
+        ascii_count = sum(1 for c in text if ord(c) < 128)
+        if ascii_count > len(text) * 0.6:
+            return self._process_en(text)
+
         # ── 1. 数学优先: 含数字+运算符或明确求值词 ──
         if re.search(r'\d\s*[\+\-\*/\^]\s*\d', text) or any(kw in text for kw in ['等于多少', '算一下', '是多少等于']):
             m = skill_lib.best_match(text)
@@ -420,6 +425,52 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         # ── 6. 默认: 对话回复 ──
         return self._conversational_reply(text)
+
+    def _process_en(self, text: str) -> tuple[str, str]:
+        """English parsing — space-delimited, less ambiguous"""
+        t = text.strip().rstrip('.!?')
+
+        if '?' in t or t.lower().startswith(('what', 'who', 'is ', 'are ', 'can ', 'does')):
+            words = t.lower().rstrip('?').split()
+            for w in words:
+                if w in ('what', 'who', 'is', 'are', 'a', 'an', 'the'): continue
+                for r in kg.relations:
+                    if r.subject.lower() == w:
+                        return (f"{r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})", "en_query")
+            return ("I don't know about that yet. Teach me: 'X is Y'?", "en_unknown")
+
+        m = re.search(r'(\w[\w\s]{0,30}?)\s+is\s+(?:a\s+|an\s+)?(\w[\w\s]{0,30}?)$', t, re.I)
+        if m:
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            if subj.lower() in ('it', 'this', 'that', 'he', 'she', 'i', 'you'): return ("I'm listening!", "en_ack")
+            kg.add(subj, "IS_A", obj, confidence=0.7)
+            db.add_relation(subj, "IS_A", obj, 0.7, source="en")
+            _auto_export()
+            return (f"Got it: {subj} is a {obj}", "learn_fact")
+
+        m = re.search(r'(\w[\w\s]{0,30}?)\s+can\s+(\w[\w\s]{0,30}?)$', t, re.I)
+        if m:
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            kg.add(subj, "CAN", obj, confidence=0.6)
+            db.add_relation(subj, "CAN", obj, 0.6, source="en")
+            _auto_export()
+            return (f"Got it: {subj} can {obj}", "learn_can")
+
+        for pat, pred in [
+            (r'(\w[\w\s]{0,30}?)\s+causes?\s+(\w[\w\s]{0,30}?)$', 'CAUSES'),
+            (r'(\w[\w\s]{0,30}?)\s+orbits?\s+(\w[\w\s]{0,30}?)$', 'ORBITS'),
+            (r'(\w[\w\s]{0,30}?)\s+belongs?\s+to\s+(\w[\w\s]{0,30}?)$', 'BELONGS_TO'),
+            (r'(\w[\w\s]{0,30}?)\s+includes?\s+(\w[\w\s]{0,30}?)$', 'INCLUDES'),
+        ]:
+            m = re.search(pat, t, re.I)
+            if m:
+                subj, obj = m.group(1).strip(), m.group(2).strip()
+                kg.add(subj, pred, obj, confidence=0.7)
+                db.add_relation(subj, pred, obj, 0.7, source="en")
+                _auto_export()
+                return (f"Got it: {subj} {pred} {obj}", "learn_fact")
+
+        return ("I heard you. Try: 'cat is animal' / 'bird can fly'?", "en_casual")
 
     def _conversational_reply(self, text: str) -> tuple[str, str]:
         """对话回复——用户教的偏好优先, 再默认"""
