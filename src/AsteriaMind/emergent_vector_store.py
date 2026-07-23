@@ -39,6 +39,8 @@ def _simple_hash_vector(texts: list[str], dim: int = 64) -> list[float]:
     vec = [0.0] * dim
     total = 0
     for text in texts:
+        if text is None:
+            text = ""  # 防止 len(None) 崩溃
         # n-grams: 2-gram + 3-gram
         for n in (2, 3):
             for i in range(len(text) - n + 1):
@@ -112,6 +114,9 @@ class EmergentVectorStore:
         pattern: 抽象模式标识 (从词性推断)
         feedback: confirmed / corrected / unknown
         """
+        subj = subj or ""
+        pred = pred or ""
+        obj = obj or ""
         pattern = f"{subj[:8]}::{pred}::{obj[:8]}"
         vec = _simple_hash_vector([subj, pred, obj, pattern, feedback])
 
