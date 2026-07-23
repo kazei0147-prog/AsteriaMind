@@ -156,25 +156,95 @@ class SemanticHypothesisEngine:
 
         return sorted(hypotheses, key=lambda h: h.confidence, reverse=True)
 
+    def _resolve_entity_boundaries(self, text: str) -> list[str]:
+        """
+        KG 驱动的实体边界解析器 v0.2。
+
+        - 中文: KG 最长匹配优先，未匹配单字合并，遇已知功能词/关系词停止合并
+        - 英文/数字: 连续 ASCII 或数字保持为一词
+        """
+        if not self.kg:
+            return re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]+|\d+', text)
+
+        known_entities: dict[str, int] = {}
+        for r in self.kg.relations:
+            for candidate in (r.subject, r.object):
+                if candidate and len(candidate) >= 2:
+                    known_entities[candidate] = len(candidate)
+
+        known_func_words = set()
+        for w in ('是','绕','围绕','属于','会','能','吗','呢','吧',
+                  '不','是否','什么','谁','哪','怎么','如何','不是',
+                  '导致','引起','和','或','但','而','也','都','还',
+                  '了','着','过','的','在','被','把','让','用','对',
+                  'is','can','orbits','causes','belongs','includes','the','a','an'):
+            known_func_words.add(w)
+
+        sorted_entities = sorted(known_entities.keys(), key=lambda x: -len(x))
+
+        tokens = []
+        i = 0
+        while i < len(text):
+            # 英文/数字: 连续 ASCII 或数字
+            if text[i].isascii() and text[i].isalpha():
+                j = i
+                while j < len(text) and text[j].isascii() and (text[j].isalpha() or text[j] == ' '):
+                    j += 1
+                word = text[i:j].strip()
+                if word:
+                    for subword in word.split():
+                        tokens.append(subword)
+                i = j
+                continue
+
+            # 中文: KG 最长匹配
+            matched = False
+            for entity in sorted_entities:
+                if text[i:].startswith(entity):
+                    tokens.append(entity)
+                    i += len(entity)
+                    matched = True
+                    break
+            if not matched:
+                tokens.append(text[i])
+                i += 1
+
+        # 合并相邻单中文字: "地"+"球" → "地球", 遇功能词则断开
+        merged = []
+        buffer = ""
+        for tok in tokens:
+            is_single_cn = len(tok) == 1 and '\u4e00' <= tok <= '\u9fff'
+            if is_single_cn:
+                # 功能词或已知关系词 → 断开
+                if tok in known_func_words or tok in self.primitive_registry:
+                    if buffer:
+                        merged.append(buffer)
+                        buffer = ""
+                    merged.append(tok)
+                else:
+                    buffer += tok
+            else:
+                if buffer:
+                    merged.append(buffer)
+                    buffer = ""
+                merged.append(tok)
+        if buffer:
+            merged.append(buffer)
+
+        return merged
+
     def _extract_primitives(self, text: str) -> list[LanguagePrimitive]:
         """
         从文本中提取语言原语。
 
-        不使用 NLP 库——用 KG 已知词性 + 位置启发式。
+        v0.2: 用 KG 已知实体边界 → 最长匹配优先 → 不切碎多字实体。
         """
         prims = []
-        # 按空格/标点分词，中文单字拆
-        raw_tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]+|\d+', text)
-        tokens = []
-        for tok in raw_tokens:
-            if re.match(r'^[\u4e00-\u9fff]+$', tok) and len(tok) > 1:
-                tokens.extend(list(tok))  # 中文单字拆
-            else:
-                tokens.append(tok)
+        tokens = self._resolve_entity_boundaries(text)
 
         for i, tok in enumerate(tokens):
             cat = self._classify_token(tok, i, tokens)
-            conf = 0.7 if cat in self.primitive_registry.values() else 0.5
+            conf = 0.7 if tok in self.primitive_registry else 0.5
             prims.append(LanguagePrimitive(tok, cat, conf,
                          "kg" if tok in self.primitive_registry else "heuristic"))
 
@@ -191,7 +261,7 @@ class SemanticHypothesisEngine:
             for r in self.kg.relations:
                 if r.subject == token:
                     obj = r.object.lower() if r.object else ""
-                    if "系动词" in obj or "copula" in obj or "relation" in obj:
+                    if "系动词" in obj or "copula" in obj or "relation" in obj or "关系" in obj:
                         self.primitive_registry[token] = "Relation"
                         return "Relation"
                     if "疑问" in obj or "question" in obj:
@@ -206,9 +276,29 @@ class SemanticHypothesisEngine:
                     if "时间" in obj or "time" in obj:
                         self.primitive_registry[token] = "Time"
                         return "Time"
+                    if "助动词" in obj or "auxiliary" in obj or "能力" in obj:
+                        self.primitive_registry[token] = "Relation"
+                        return "Relation"
+                    if "因果" in obj or "导致" in obj or "cause" in obj:
+                        self.primitive_registry[token] = "Relation"
+                        return "Relation"
+                    if "连词" in obj or "conjunction" in obj:
+                        self.primitive_registry[token] = "Attribute"
+                        return "Attribute"
 
-        # 位置启发式
-        if token in ('吗', '呢', '吧', '?', '？', '吗?', '什么', '谁', '哪', '怎么', '如何'):
+        # 位置启发式 (KG 没教语法词时的降级)
+        if token in ('吗', '呢', '吧', '?', '？', '什么', '谁', '哪', '怎么', '如何', '是否'):
+            self.primitive_registry[token] = "Question"
+            return "Question"
+        if token in ('不', '没', '别', '无', '非', '不是'):
+            self.primitive_registry[token] = "Negation"
+            return "Negation"
+        if token in ('是', '绕', '围绕', '属于', '导致', '引起', '和', '或'):
+            self.primitive_registry[token] = "Relation"
+            return "Relation"
+        if token in ('会', '能', '可以'):
+            self.primitive_registry[token] = "Relation"  # 助动词 = 关系子类
+            return "Relation"
             self.primitive_registry[token] = "Question"
             return "Question"
         if token in ('不', '没', '别', '无', '非'):
@@ -233,17 +323,22 @@ class SemanticHypothesisEngine:
                     obj = r.object.lower() if r.object else ""
                     if "is_a" in obj or "系动词" in obj or "copula" in obj:
                         return "IS_A"
-                    if "cause" in obj or "导致" in obj:
+                    if "cause" in obj or "导致" in obj or "因果" in obj:
                         return "CAUSES"
-                    if "orbit" in obj or "围绕" in obj:
+                    if "orbit" in obj or "围绕" in obj or "关系词" in obj:
                         return "ORBITS"
                     if "belong" in obj or "属于" in obj:
                         return "BELONGS_TO"
-                    if "can" in obj or "ability" in obj or "能力" in obj:
+                    if "can" in obj or "ability" in obj or "能力" in obj or "助动词" in obj:
                         return "CAN"
                     if "action" in obj:
                         return "DOES"
-        return "IS_A"  # 默认系动词
+        # 降级: 硬编码常见关系词
+        if relation in ('绕', '围绕'): return "ORBITS"
+        if relation in ('导致', '引起', '产生', '造成'): return "CAUSES"
+        if relation in ('属于', '是'): return "IS_A"
+        if relation in ('会', '能', '可以'): return "CAN"
+        return "IS_A"
 
     def register_pattern(self, pattern: dict, confidence: float):
         """从成功的交互中注册语言模式"""
