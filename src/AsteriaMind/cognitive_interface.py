@@ -524,81 +524,37 @@ class PragmaticIntentEngine:
     """
     层二: "为什么说?"
 
-    不是单一意图分类——是多个语用假说竞标。
-
-    输入: 结构假说 + 对话上下文
-    输出: [H1: capability_check 0.7, H2: social_test 0.2, H3: casual_chat 0.1]
+    v2: 零关键词匹配。意图只从句子结构推断。
+    用户说"你好"但没教过"问候语"概念 → AM 不知道该做什么 → 诚实说不知道。
     """
 
     def __init__(self, kg=None):
         self.kg = kg
-        self.templates: list[dict] = []
 
-    def hypothesize(self, structural: StructuralHypothesis,
-                    context: dict = None) -> list[PragmaticHypothesis]:
-        """生成语用假说"""
-        hyps = []
-        text = structural.text
+    def hypothesize(self, structural, context=None):
         struct = structural.structure
+        hyps = []
 
-        # ── 基础假说模板池 ──
-        # H0: 能力探测先于问候!
-        if any(w in text for w in ('你', '会', '能', '做什么', '能力', '了解', '知道')):
-            if struct.get("question") or any(w in text for w in ('什么', '吗')):
-                hyps.append(PragmaticHypothesis("PH2", "capability_check",
-                    "用户在探索 AM 的能力边界", confidence=0.6,
-                    reasoning="含自我指涉词+能力词"))
-
-        # H0A: 自我身份询问
-        if any(p in text for p in ('你是谁', '你叫什么', '你的名字', '你是什么', '怎么称呼')):
-            hyps.append(PragmaticHypothesis("PH0A", "self_identity",
-                "用户想了解 AM 的身份", confidence=0.9))
-
-        # H0B: 问候/告别
-        if any(w in text for w in ('你好', 'hello', 'hi', '嗨', '您好', '再见', '拜拜', 'bye', '晚安', '早安')):
-            hyps.append(PragmaticHypothesis("PH0", "social_ritual",
-                "用户在进行问候", confidence=0.85))
-
-        # H1: 知识询问 (用户想知道某个事实)
-        if struct.get("question") and struct.get("predicate") in ("IS_A", "CAN", "DOES", "ORBITS"):
+        # H1: 信息询问 — 含疑问标记 + 已知关系
+        if struct.get("question") and struct.get("predicate") in (
+            "IS_A", "CAN", "DOES", "ORBITS", "CAUSES", "HAS", "LOCATED_AT"):
             hyps.append(PragmaticHypothesis("PH1", "info_request",
-                f"用户想确认「{struct.get('subject')}」是否「{struct.get('predicate')} {struct.get('object')}」",
-                confidence=0.7, reasoning="结构含疑问标记+关系词"))
+                f"用户想知道: {struct.get('subject')} {struct.get('predicate')} {struct.get('object')}?",
+                0.75, "三元组+疑问标记"))
 
-        # H2: 能力探测 (用户在测试系统边界)
-        if any(w in text for w in ('你', '会', '能', '做什么', '能力', '了解', '知道')):
-            hyps.append(PragmaticHypothesis("PH2", "capability_check",
-                "用户在探索 AM 的能力边界", confidence=0.6,
-                reasoning="含自我指涉词+能力词"))
+        # H2: 自我指涉 — 视角=你 + 疑问
+        if struct.get("perspective") == "你" and struct.get("question"):
+            hyps.append(PragmaticHypothesis("PH2", "self_directed",
+                "用户在问关于 AM 自身的问题", 0.65, "视角=你+疑问"))
 
-        # H3: 社交仪式 (问候/闲聊/试探关系)
-        if len(text) <= 6 or structural.confidence < 0.4:
-            hyps.append(PragmaticHypothesis("PH3", "social_ritual",
-                "用户可能在建立/维持社交关系", confidence=0.4,
-                reasoning="短文本或低结构置信度"))
-
-        # H4: 教学意图 (用户想教 AM 新知识)
-        if any(w in text for w in ('learn', 'answer', '你记住', '记一下')):
-            hyps.append(PragmaticHypothesis("PH4", "teach",
-                "用户想向 AM 传授知识", confidence=0.8,
-                reasoning="含教学触发词"))
-
-        # H5: 单纯闲聊
-        if structural.confidence < 0.5:
-            hyps.append(PragmaticHypothesis("PH5", "casual_chat",
-                "用户可能只是随便聊聊", confidence=0.5,
-                reasoning="无法建立高置信度结构"))
-
+        # H3: 低置信——无法确定, 诚实承认
         if not hyps:
-            hyps.append(PragmaticHypothesis("PH6", "unknown",
-                "无法确定用户意图", confidence=0.3))
+            hyps.append(PragmaticHypothesis("PH3", "uncertain",
+                f"无法从结构确定意图 (置信度{structural.confidence:.0%})",
+                0.3, "无匹配结构模式"))
 
         return sorted(hyps, key=lambda h: h.confidence, reverse=True)
 
-
-# ═══════════════════════════════════════
-#  ActionIntentEngine (保留现有功能)
-# ═══════════════════════════════════════
 
 class ActionIntentEngine:
     """
@@ -721,12 +677,12 @@ class CognitiveInterface:
         return result
 
     def generate_reply(self, result: dict, text: str = "") -> str:
-        """根据语义+语用+认知结果, 生成回复"""
+        """根据语义+语用+认知结果, 生成回复——零模板兜底"""
         action = result.get("action", "")
         sem = result.get("semantic")
         prag = result.get("pragmatic")
 
-        # 事实学习
+        # 事实学习——存 KG
         if action == "fact_learn" and sem:
             s = sem.structure
             subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
@@ -735,37 +691,29 @@ class CognitiveInterface:
                 self.db.add_relation(subj, pred, obj, 0.7, source="web")
             return f"✅ 学会了: {subj} {pred} {obj}"
 
-        # KG 查询: 是否有已知事实
-        kg_hits = []
-        if sem and sem.structure.get("subject") and self.kg:
-            subj = sem.structure["subject"]
-            obj = sem.structure.get("object")
-            for r in self.kg.relations:
-                if r.subject == subj and r.confidence > 0.5:
-                    kg_hits.append(r)
-
         if prag:
-            if prag.type == "capability_check":
-                facts = self.db.count() if self.db else 0
-                return f"我可以: 📚 {facts} 条知识、🧩 推理引擎。你想让我学什么?"
-            if prag.type == "self_identity":
-                name = "AsteriaMind"
-                role = "一个正在进化的认知系统"
-                if self.kg:
-                    for r in self.kg.relations:
-                        if r.subject == "我" and r.predicate == "MEANS": name = r.object
-                        if r.subject == "我" and r.predicate == "IS_A": role = r.object
-                return f"我是 {name}, {role}。是你在培养的 AI。"
             if prag.type == "info_request":
-                if kg_hits:
-                    lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object}" for r in kg_hits[:5]]
-                    return "关于这个我知道:\n" + "\n".join(lines)
-                return "关于这个我还不知道。你能教我吗?"
-            if prag.type == "social_ritual":
-                if any(w in text for w in ('再见', '拜拜', 'bye', '晚安')):
-                    return "再见! 随时回来 👋"
-                return "你好呀~ 🌻"
-            if prag.type == "teach":
-                return "好的, 我在听! 你想教我什么?"
+                if sem:
+                    s = sem.structure
+                    subj = s.get("subject")
+                    kg_hits = []
+                    if self.kg and subj:
+                        for r in self.kg.relations:
+                            if r.subject == subj and r.confidence > 0.5:
+                                kg_hits.append(r)
+                    if kg_hits:
+                        lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object}" for r in kg_hits[:5]]
+                        return "我找到这些:\n" + "\n".join(lines)
+                    return f"关于 {subj} 我还不知道。你能教我吗?"
 
-        return "我记下了。试试更具体地说?"
+            if prag.type == "self_directed":
+                facts = self.db.count() if self.db else 0
+                return f"我是 AsteriaMind, 存储了 {facts} 条知识。你想让我学什么?"
+
+            if prag.type == "uncertain":
+                return f"我不太确定你的意思 😅 能换个方式说吗? 比如 'X是Y' 或 'X会Y吗'?"
+
+        return "我听到了。但不太确定怎么回应——试试教我点什么?"
+
+
+    
