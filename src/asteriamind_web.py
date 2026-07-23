@@ -321,57 +321,87 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if '?' in text or '？' in text or '吗' in text or '是什么' in text or '是谁' in text or text.startswith('什么') or text.startswith('谁'):
             return self._handle_question(text)
 
-        # ── 5. 事实陈述——多句型解析 ──
-        # 句型1: "X是Y的Z" / "X是Y的" → X HAS_RELATION Z (related_to Y)
-        m = re.search(r'^([\u4e00-\u9fff\w]{1,10})是([\u4e00-\u9fff\w]{1,10})的([\u4e00-\u9fff\w]{1,10})[\u3002\.\?？!！]?$', text)
-        if m:
-            subj, owner, rel = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-            kg.add(subj, f"HAS_{rel.upper()}", owner, confidence=0.7)
-            db.add_relation(subj, f"HAS_{rel.upper()}", owner, 0.7, source="web")
-            _auto_export()
-            return (f"✅ 学会了: {subj} 的 {rel} 是 {owner}", "learn_possessive")
+        # ── 5. 事实陈述——多句型解析 (去掉了 ^ 开头限制!) ──
+        learned = []  # 本轮学到的所有事实
 
-        # 句型2: "X是Y" (简单 IS_A)
-        m = re.search(r'^([\u4e00-\u9fff\w]{1,15})是([\u4e00-\u9fff\w]{1,20})[\u3002\.\?？!！]?$', text)
-        if m:
-            subj, obj = m.group(1).strip(), m.group(2).strip()
-            if subj in ('这', '那', '这个', '那个', '它', '他', '她', '我', '你'): return self._conversational_reply(text)
-            kg.add(subj, "IS_A", obj, confidence=0.7)
-            db.add_relation(subj, "IS_A", obj, 0.7, source="web")
-            _auto_export()
-            # 反向推理: 如果已经知道 A IS_A B, 且这条说 B IS_A C, 推出 A IS_A C
-            inferred = self._infer_transitive(subj, obj)
-            if inferred:
-                return (f"✅ 学会了: {subj} 是一种 {obj}\n🔗 推理: {inferred}", "learn_fact")
-            return (f"✅ 学会了: {subj} 是一种 {obj}", "learn_fact")
+        # 先按中文分隔符拆句: 逗号/分号/句号/也/和/还/然后
+        clauses = re.split(r'[，,；;。]|(?<=[\u4e00-\u9fff])(?:也|还|和|然后|而且)(?=[\u4e00-\u9fff])', text)
+        clauses = [c.strip() for c in clauses if len(c.strip()) >= 4]
 
-        # 句型3: "X围绕Y环绕" / "X围绕Y运行" — 非贪婪, 以"围绕"为分隔
-        m = re.search(r'^(.+?)(?:围绕|绕着|绕)(.+?)(?:环绕|运行|运动|转|转动)?[\u3002\.]?$', text)
-        if m:
-            subj, obj = m.group(1).strip(), m.group(2).strip()
-            kg.add(subj, "ORBITS", obj, confidence=0.7)
-            db.add_relation(subj, "ORBITS", obj, 0.7, source="web")
-            _auto_export()
-            return (f"✅ 学会了: {subj} 围绕 {obj} 运行", "learn_orbit")
+        if not clauses:
+            clauses = [text]
 
-        # 句型4: "X属于Y" / "X是Y的一种"
-        m = re.search(r'^([\u4e00-\u9fff\w]{1,10})(?:属于|属于于)([\u4e00-\u9fff\w]{1,15})[\u3002\.]?$', text)
-        if m:
-            subj, obj = m.group(1).strip(), m.group(2).strip()
-            kg.add(subj, "BELONGS_TO", obj, confidence=0.7)
-            db.add_relation(subj, "BELONGS_TO", obj, 0.7, source="web")
-            _auto_export()
-            return (f"✅ 学会了: {subj} 属于 {obj}", "learn_belong")
+        for clause in clauses:
+            if len(clause) < 4:
+                continue
 
-        # 句型5: "X会/能/导致Y"
-        m = re.search(r'^([\u4e00-\u9fff\w]{1,15})(?:会|能|可以|导致|引起|产生)([\u4e00-\u9fff\w]{1,20})[\u3002\.\?？!！]?$', text)
-        if m:
-            subj, obj = m.group(1).strip(), m.group(2).strip()
-            if subj in ('这', '那', '这个', '那个', '它', '他', '她'): return self._conversational_reply(text)
-            kg.add(subj, "CAUSES", obj, confidence=0.6)
-            db.add_relation(subj, "CAUSES", obj, 0.6, source="web")
+            # 句型1: "X是Y的Z"
+            m = re.search(r'([\u4e00-\u9fff\w]{1,10})是([\u4e00-\u9fff\w]{1,10})的([\u4e00-\u9fff\w]{1,10})', clause)
+            if m:
+                subj, owner, rel = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+                if subj not in ('这', '那', '这个', '那个', '它', '他', '她', '我', '你'):
+                    kg.add(subj, f"HAS_{rel.upper()}", owner, confidence=0.7)
+                    db.add_relation(subj, f"HAS_{rel.upper()}", owner, 0.7, source="web")
+                    learned.append(f"{subj}的{rel}是{owner}")
+                    continue
+
+            # 句型2: "X是Y" (简单 IS_A)
+            m = re.search(r'([\u4e00-\u9fff\w]{1,15})是([\u4e00-\u9fff\w]{1,20})', clause)
+            if m:
+                subj, obj = m.group(1).strip(), m.group(2).strip()
+                if subj in ('这', '那', '这个', '那个', '它', '他', '她', '我', '你', '什么', '怎么'):
+                    continue
+                kg.add(subj, "IS_A", obj, confidence=0.7)
+                db.add_relation(subj, "IS_A", obj, 0.7, source="web")
+                learned.append(f"{subj}是一种{obj}")
+                self._infer_transitive(subj, obj)
+                continue
+
+            # 句型3: "X围绕Y环绕" / "X绕Y转"
+            m = re.search(r'([\u4e00-\u9fff\w]{1,8})(?:围绕|绕着|绕)([\u4e00-\u9fff\w]{1,8})(?:环绕|运行|运动|转|转动)?', clause)
+            if m:
+                subj, obj = m.group(1).strip(), m.group(2).strip()
+                if subj not in ('这', '那', '它'):
+                    kg.add(subj, "ORBITS", obj, confidence=0.7)
+                    db.add_relation(subj, "ORBITS", obj, 0.7, source="web")
+                    learned.append(f"{subj}绕{obj}运行")
+                    continue
+
+            # 句型4: "X属于Y"
+            m = re.search(r'([\u4e00-\u9fff\w]{1,10})(?:属于|属于于)([\u4e00-\u9fff\w]{1,15})', clause)
+            if m:
+                subj, obj = m.group(1).strip(), m.group(2).strip()
+                kg.add(subj, "BELONGS_TO", obj, confidence=0.7)
+                db.add_relation(subj, "BELONGS_TO", obj, 0.7, source="web")
+                learned.append(f"{subj}属于{obj}")
+                continue
+
+            # 句型5: "X会/能/导致Y"
+            m = re.search(r'([\u4e00-\u9fff\w]{1,15})(?:会|能|可以|导致|引起|产生)([\u4e00-\u9fff\w]{1,20})', clause)
+            if m:
+                subj, obj = m.group(1).strip(), m.group(2).strip()
+                if subj in ('这', '那', '这个', '那个', '它', '他', '她', '你', '我'): continue
+                kg.add(subj, "CAUSES", obj, confidence=0.6)
+                db.add_relation(subj, "CAUSES", obj, 0.6, source="web")
+                learned.append(f"{subj}会导致{obj}")
+                continue
+
+        if learned:
             _auto_export()
-            return (f"✅ 学会了: {subj} 会导致 {obj}", "learn_cause")
+            if len(learned) == 1:
+                return (f"✅ 学会了: {learned[0]}", "learn_fact")
+            else:
+                return (f"✅ 从这段话里学会了 {len(learned)} 条知识:\n" + "\n".join(f"  · {l}" for l in learned), "learn_multi")
+
+        # ── 5.5: 什么都没匹配到 → 尝试理解 (语义搜索) ──
+        # 查向量层是否有语义相似的已知概念
+        if len(text) >= 3:
+            hints = []
+            for r in kg.relations:
+                if r.subject in text or text[:3] in r.subject:
+                    hints.append(f"'{r.subject}' --[{r.predicate}]--> '{r.object}'")
+            if hints:
+                return (f"不太确定你要表达的关系, 但我联想到:\n" + "\n".join(f"  · {h}" for h in hints[:3]), "semantic_hint")
 
         # ── 6. 默认: 对话回复 ──
         return self._conversational_reply(text)

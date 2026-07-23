@@ -126,6 +126,24 @@
     "source": "observed"
   },
   {
+    "subject": "再见",
+    "predicate": "REPLIES_WITH",
+    "object": "拜拜～",
+    "alpha": 9.0,
+    "beta": 0.9999999999999998,
+    "confidence": 0.9,
+    "source": "observed"
+  },
+  {
+    "subject": "谢谢",
+    "predicate": "REPLIES_WITH",
+    "object": "不客气！",
+    "alpha": 9.0,
+    "beta": 0.9999999999999998,
+    "confidence": 0.9,
+    "source": "observed"
+  },
+  {
     "subject": "着",
     "predicate": "MEANS",
     "object": "助词，表示进行中",
@@ -237,9 +255,9 @@
     "subject": "咖啡",
     "predicate": "IS_A",
     "object": "一种饮料",
-    "alpha": 7.0,
+    "alpha": 14.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.7,
+    "confidence": 0.8235294117647058,
     "source": "observed"
   },
   {
@@ -345,9 +363,9 @@
     "subject": "鸟类",
     "predicate": "IS_A",
     "object": "动物",
-    "alpha": 21.0,
+    "alpha": 28.0,
     "beta": 3.0000000000000004,
-    "confidence": 0.875,
+    "confidence": 0.9032258064516129,
     "source": "observed"
   },
   {
@@ -540,21 +558,66 @@
     "source": "observed"
   },
   {
-    "subject": "再见",
-    "predicate": "REPLIES_WITH",
-    "object": "拜拜～",
-    "alpha": 9.0,
-    "beta": 0.9999999999999998,
-    "confidence": 0.9,
+    "subject": "地球",
+    "predicate": "ORBITS",
+    "object": "太阳转",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
     "source": "observed"
   },
   {
-    "subject": "谢谢",
-    "predicate": "REPLIES_WITH",
-    "object": "不客气！",
-    "alpha": 9.0,
-    "beta": 0.9999999999999998,
-    "confidence": 0.9,
+    "subject": "月球",
+    "predicate": "ORBITS",
+    "object": "地球转",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "鱼",
+    "predicate": "CAUSES",
+    "object": "在水里游",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "狗",
+    "predicate": "IS_A",
+    "object": "哺乳动物",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "星星",
+    "predicate": "CAUSES",
+    "object": "发光",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
+    "subject": "铁",
+    "predicate": "BELONGS_TO",
+    "object": "金属",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "跑步",
+    "predicate": "CAUSES",
+    "object": "减肥",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
     "source": "observed"
   }
 ]
