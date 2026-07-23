@@ -585,6 +585,69 @@
     "source": "observed"
   },
   {
+    "subject": "cat",
+    "predicate": "IS_A",
+    "object": "animal",
+    "alpha": 14.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.8235294117647058,
+    "source": "observed"
+  },
+  {
+    "subject": "dog",
+    "predicate": "IS_A",
+    "object": "mammal",
+    "alpha": 14.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.8235294117647058,
+    "source": "observed"
+  },
+  {
+    "subject": "earth",
+    "predicate": "ORBITS",
+    "object": "sun",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "moon",
+    "predicate": "ORBITS",
+    "object": "earth",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "fire",
+    "predicate": "CAUSES",
+    "object": "heat",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "gold",
+    "predicate": "BELONGS_TO",
+    "object": "metal",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
+    "subject": "Can you tell me what",
+    "predicate": "IS_A",
+    "object": "the derivative of x squared",
+    "alpha": 7.0,
+    "beta": 3.0000000000000004,
+    "confidence": 0.7,
+    "source": "observed"
+  },
+  {
     "subject": "你",
     "predicate": "CAUSES",
     "object": "试着学习如何和我聊天呢",
@@ -702,6 +765,24 @@
     "source": "observed"
   },
   {
+    "subject": "bird",
+    "predicate": "CAN",
+    "object": "fly",
+    "alpha": 12.0,
+    "beta": 4.0,
+    "confidence": 0.75,
+    "source": "observed"
+  },
+  {
+    "subject": "fish",
+    "predicate": "CAN",
+    "object": "swim",
+    "alpha": 6.0,
+    "beta": 4.0,
+    "confidence": 0.6,
+    "source": "observed"
+  },
+  {
     "subject": "我指",
     "predicate": "APPEARED_IN",
     "object": "我指着对方说了一句话",
@@ -807,78 +888,6 @@
     "alpha": 3.0,
     "beta": 7.0,
     "confidence": 0.3,
-    "source": "observed"
-  },
-  {
-    "subject": "cat",
-    "predicate": "IS_A",
-    "object": "animal",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
-    "source": "observed"
-  },
-  {
-    "subject": "dog",
-    "predicate": "IS_A",
-    "object": "mammal",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
-    "source": "observed"
-  },
-  {
-    "subject": "bird",
-    "predicate": "CAN",
-    "object": "fly",
-    "alpha": 6.0,
-    "beta": 4.0,
-    "confidence": 0.6,
-    "source": "observed"
-  },
-  {
-    "subject": "earth",
-    "predicate": "ORBITS",
-    "object": "sun",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
-    "source": "observed"
-  },
-  {
-    "subject": "moon",
-    "predicate": "ORBITS",
-    "object": "earth",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
-    "source": "observed"
-  },
-  {
-    "subject": "fire",
-    "predicate": "CAUSES",
-    "object": "heat",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
-    "source": "observed"
-  },
-  {
-    "subject": "gold",
-    "predicate": "BELONGS_TO",
-    "object": "metal",
-    "alpha": 7.0,
-    "beta": 3.0000000000000004,
-    "confidence": 0.7,
-    "source": "observed"
-  },
-  {
-    "subject": "fish",
-    "predicate": "CAN",
-    "object": "swim",
-    "alpha": 6.0,
-    "beta": 4.0,
-    "confidence": 0.6,
     "source": "observed"
   }
 ]

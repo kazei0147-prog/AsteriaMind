@@ -428,16 +428,28 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
     def _process_en(self, text: str) -> tuple[str, str]:
         """English parsing — space-delimited, less ambiguous"""
-        t = text.strip().rstrip('.!?')
+        t = text.strip()
+        tl = t.lower()
 
-        if '?' in t or t.lower().startswith(('what', 'who', 'is ', 'are ', 'can ', 'does')):
-            words = t.lower().rstrip('?').split()
+        # ── Questions (CHECED FIRST, before any fact pattern) ──
+        is_question = ('?' in t or tl.startswith(('what', 'who', 'how', 'where', 'when', 'why'))
+                       or tl.startswith('is ') or tl.startswith('are ')
+                       or tl.startswith('can ') or tl.startswith('does ')
+                       or tl.startswith('do ') or 'tell me what' in tl or 'tell me who' in tl
+                       or tl.startswith('could ') or tl.startswith('would '))
+
+        if is_question:
+            # Clean up
+            clean = t.rstrip('?.!').lower()
+            words = [w for w in clean.split() if w not in
+                     ('what', 'who', 'is', 'are', 'a', 'an', 'the', 'can', 'you',
+                      'tell', 'me', 'of', 'does', 'do', 'how', 'where', 'when', 'why',
+                      'could', 'would', 'please', 'to')]
             for w in words:
-                if w in ('what', 'who', 'is', 'are', 'a', 'an', 'the'): continue
                 for r in kg.relations:
                     if r.subject.lower() == w:
                         return (f"{r.subject} --[{r.predicate}]--> {r.object} ({r.confidence:.0%})", "en_query")
-            return ("I don't know about that yet. Teach me: 'X is Y'?", "en_unknown")
+            return ("I don't know that yet. Try teaching me!", "en_unknown")
 
         m = re.search(r'(\w[\w\s]{0,30}?)\s+is\s+(?:a\s+|an\s+)?(\w[\w\s]{0,30}?)$', t, re.I)
         if m:
