@@ -144,6 +144,15 @@
     "source": "observed"
   },
   {
+    "subject": "打招呼",
+    "predicate": "REPLIES_WITH",
+    "object": "嗨～",
+    "alpha": 18.0,
+    "beta": 0.9999999999999998,
+    "confidence": 0.9473684210526315,
+    "source": "observed"
+  },
+  {
     "subject": "着",
     "predicate": "MEANS",
     "object": "助词，表示进行中",
@@ -1150,5 +1159,14 @@
     "beta": 7.0,
     "confidence": 0.3,
     "source": "observed"
+  },
+  {
+    "subject": "2+3=?",
+    "predicate": "EQUALS",
+    "object": "5",
+    "alpha": 9.5,
+    "beta": 0.5000000000000004,
+    "confidence": 0.95,
+    "source": "math_derived"
   }
 ]

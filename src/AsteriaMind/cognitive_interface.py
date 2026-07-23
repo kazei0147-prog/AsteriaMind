@@ -1,0 +1,477 @@
+"""
+Cognitive Interface Layer — AM 的感觉器官 (AsteriaMind v3.2)
+
+不是"输入分类器"。
+是外部人类语言 ↔ 内部符号认知的神经桥接。
+
+架构:
+  Input
+    ↓
+  SemanticHypothesisEngine  ("他说了什么?")
+    ↓
+  PragmaticIntentEngine     ("为什么说?")
+    ↓
+  ActionIntentEngine        ("执行什么动作?")
+    ↓
+  Cognitive Core (KG / MH / WorldModel)
+
+三层共享 MH 的 BudgetContest→scoring→falsification 机制,
+但 Registry 独立分离:
+  - WorldHypothesisRegistry
+  - SemanticPatternRegistry
+  - PragmaticIntentRegistry
+
+7 个最小语言原语:
+  Entity | Relation | Attribute | Time | Question | Negation | Perspective
+"""
+import re
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+# ═══════════════════════════════════════
+#  最小语言原语
+# ═══════════════════════════════════════
+
+@dataclass
+class LanguagePrimitive:
+    """一个语言原子——AM 不需要被教语法，她用这些原子自己去发现模式"""
+    token: str          # 原始文本 token
+    category: str       # Entity / Relation / Attribute / Time / Question / Negation / Perspective
+    confidence: float   # 分类置信度
+    source: str = ""    # 来源: kg_known / position_guess / user_taught
+
+
+# ═══════════════════════════════════════
+#  语义假说 (Semantic Hypothesis)
+# ═══════════════════════════════════════
+
+@dataclass
+class StructuralHypothesis:
+    """一句话可能有多种结构解释——这是其中一种"""
+    id: str
+    text: str                      # 原始输入
+    structure: dict                # {subject, predicate, object, question, negated, perspective}
+    confidence: float = 0.5
+    evidence: list[str] = field(default_factory=list)
+    reasoning: str = ""
+
+    def desc(self) -> str:
+        s = self.structure
+        return f"[{s.get('subject','?')}] --[{s.get('predicate','?')}]--> [{s.get('object','?')}]" + \
+               (" ?" if s.get('question') else "") + \
+               (" NOT" if s.get('negated') else "")
+
+
+# ═══════════════════════════════════════
+#  语用假说 (Pragmatic Hypothesis)
+# ═══════════════════════════════════════
+
+@dataclass
+class PragmaticHypothesis:
+    """用户在说这句话时，真正目的是什么？"""
+    id: str
+    type: str         # info_request / capability_check / social_ritual / test / complaint / teach
+    label: str        # 人类可读标签
+    confidence: float = 0.5
+    reasoning: str = ""
+
+
+# ═══════════════════════════════════════
+#  SemanticHypothesisEngine
+# ═══════════════════════════════════════
+
+class SemanticHypothesisEngine:
+    """
+    层一: "他说了什么?"
+
+    不是确定解析——是生成多个结构假说，给 KG 去验证。
+
+    输入: "猫是动物吗"
+    输出: [H1: (猫,IS_A,动物,query) 0.85, H2: (猫,=,动物) 0.05, H3: statement 0.10]
+    """
+
+    def __init__(self, kg=None, db=None):
+        self.kg = kg
+        self.db = db
+        self.patterns: list[dict] = []      # 已注册的语言模式
+        self.primitive_registry: dict[str, str] = {}  # token → category
+
+    def hypothesize(self, text: str) -> list[StructuralHypothesis]:
+        """生成结构假说列表"""
+        hypotheses = []
+        primitives = self._extract_primitives(text)
+
+        # ── 从原语中提取关键 token ──
+        entities = [p for p in primitives if p.category == "Entity"]
+        relations = [p for p in primitives if p.category == "Relation"]
+        questions = [p for p in primitives if p.category == "Question"]
+
+        # ── H1: 三元组结构 (Entity-Relation-Entity/Attribute) ──
+        if entities and relations:
+            subj = entities[0].token
+            pred = relations[0].token
+            # 找第二个实体或属性
+            obj = entities[1].token if len(entities) > 1 else ""
+            if not obj:
+                attrs = [p for p in primitives if p.category == "Attribute"]
+                obj = attrs[0].token if attrs else ""
+            is_question = bool(questions)
+
+            if obj:
+                # 查 KG: 这个关系词是不是已知系动词?
+                rel_type = self._guess_relation_type(pred)
+                h1 = StructuralHypothesis(
+                    "SH1", text,
+                    structure={"subject": subj, "predicate": rel_type, "object": obj,
+                               "question": is_question, "negated": False, "perspective": "user"},
+                    confidence=0.75 if obj else 0.5,
+                    evidence=[f"primitive_extraction: {[(p.token,p.category) for p in primitives]}"],
+                    reasoning=f"实体序列:{subj},{pred},{obj}" + (" 含疑问标记" if is_question else "")
+                )
+                hypotheses.append(h1)
+
+        # ── H2: 简单陈述 ──
+        if entities and not relations:
+            h2 = StructuralHypothesis(
+                "SH2", text,
+                structure={"subject": entities[0].token, "predicate": "IS_TOPIC",
+                           "object": None, "question": bool(questions), "negated": False, "perspective": "user"},
+                confidence=0.3,
+                evidence=["single_entity"],
+                reasoning="单实体, 可能只是提出话题"
+            )
+            hypotheses.append(h2)
+
+        # ── H3: 无结构——无法解析 ──
+        if not hypotheses:
+            h3 = StructuralHypothesis(
+                "SH3", text,
+                structure={"subject": None, "predicate": "UNPARSED", "object": None,
+                           "question": bool(questions), "negated": False, "perspective": "user"},
+                confidence=0.1,
+                reasoning="无法从原语构建结构"
+            )
+            hypotheses.append(h3)
+
+        return sorted(hypotheses, key=lambda h: h.confidence, reverse=True)
+
+    def _extract_primitives(self, text: str) -> list[LanguagePrimitive]:
+        """
+        从文本中提取语言原语。
+
+        不使用 NLP 库——用 KG 已知词性 + 位置启发式。
+        """
+        prims = []
+        # 按空格/标点分词，中文单字拆
+        raw_tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]+|\d+', text)
+        tokens = []
+        for tok in raw_tokens:
+            if re.match(r'^[\u4e00-\u9fff]+$', tok) and len(tok) > 1:
+                tokens.extend(list(tok))  # 中文单字拆
+            else:
+                tokens.append(tok)
+
+        for i, tok in enumerate(tokens):
+            cat = self._classify_token(tok, i, tokens)
+            conf = 0.7 if cat in self.primitive_registry.values() else 0.5
+            prims.append(LanguagePrimitive(tok, cat, conf,
+                         "kg" if tok in self.primitive_registry else "heuristic"))
+
+        return prims
+
+    def _classify_token(self, token: str, position: int, all_tokens: list) -> str:
+        """
+        分类一个 token 的语言原语类型。
+
+        优先查 KG, 其次用位置启发。
+        """
+        # KG 已有知识?
+        if self.kg:
+            for r in self.kg.relations:
+                if r.subject == token:
+                    obj = r.object.lower() if r.object else ""
+                    if "系动词" in obj or "copula" in obj or "relation" in obj:
+                        self.primitive_registry[token] = "Relation"
+                        return "Relation"
+                    if "疑问" in obj or "question" in obj:
+                        self.primitive_registry[token] = "Question"
+                        return "Question"
+                    if "否定" in obj or "negation" in obj:
+                        self.primitive_registry[token] = "Negation"
+                        return "Negation"
+                    if "助词" in obj or "量词" in obj or "冠词" in obj or "article" in obj:
+                        self.primitive_registry[token] = "Attribute"
+                        return "Attribute"
+                    if "时间" in obj or "time" in obj:
+                        self.primitive_registry[token] = "Time"
+                        return "Time"
+
+        # 位置启发式
+        if token in ('吗', '呢', '吧', '?', '？', '吗?', '什么', '谁', '哪', '怎么', '如何'):
+            self.primitive_registry[token] = "Question"
+            return "Question"
+        if token in ('不', '没', '别', '无', '非'):
+            self.primitive_registry[token] = "Negation"
+            return "Negation"
+        if token in ('你', '我', '他', '她', '它', '我们', '你们', '他们', '谁', '大家'):
+            self.primitive_registry[token] = "Perspective"
+            return "Perspective"
+        if position == 0:
+            return "Entity"
+        if re.match(r'^\d+$', token):
+            return "Attribute"
+
+        # 未知 → 默认 Entity
+        return "Entity"
+
+    def _guess_relation_type(self, relation: str) -> str:
+        """根据 KG 知识推测关系类型"""
+        if self.kg:
+            for r in self.kg.relations:
+                if r.subject == relation and r.predicate in ("IS_A", "MEANS"):
+                    obj = r.object.lower() if r.object else ""
+                    if "is_a" in obj or "系动词" in obj or "copula" in obj:
+                        return "IS_A"
+                    if "cause" in obj or "导致" in obj:
+                        return "CAUSES"
+                    if "orbit" in obj or "围绕" in obj:
+                        return "ORBITS"
+                    if "belong" in obj or "属于" in obj:
+                        return "BELONGS_TO"
+                    if "can" in obj or "ability" in obj or "能力" in obj:
+                        return "CAN"
+                    if "action" in obj:
+                        return "DOES"
+        return "IS_A"  # 默认系动词
+
+    def register_pattern(self, pattern: dict, confidence: float):
+        """从成功的交互中注册语言模式"""
+        self.patterns.append({**pattern, "confidence": confidence, "count": 1})
+
+
+# ═══════════════════════════════════════
+#  PragmaticIntentEngine
+# ═══════════════════════════════════════
+
+class PragmaticIntentEngine:
+    """
+    层二: "为什么说?"
+
+    不是单一意图分类——是多个语用假说竞标。
+
+    输入: 结构假说 + 对话上下文
+    输出: [H1: capability_check 0.7, H2: social_test 0.2, H3: casual_chat 0.1]
+    """
+
+    def __init__(self, kg=None):
+        self.kg = kg
+        self.templates: list[dict] = []
+
+    def hypothesize(self, structural: StructuralHypothesis,
+                    context: dict = None) -> list[PragmaticHypothesis]:
+        """生成语用假说"""
+        hyps = []
+        text = structural.text
+        struct = structural.structure
+
+        # ── 基础假说模板池 ──
+        # H0: 能力探测先于问候!
+        if any(w in text for w in ('你', '会', '能', '做什么', '能力', '了解', '知道')):
+            if struct.get("question") or any(w in text for w in ('什么', '吗')):
+                hyps.append(PragmaticHypothesis("PH2", "capability_check",
+                    "用户在探索 AM 的能力边界", confidence=0.6,
+                    reasoning="含自我指涉词+能力词"))
+
+        # H0A: 自我身份询问
+        if any(p in text for p in ('你是谁', '你叫什么', '你的名字', '你是什么', '怎么称呼')):
+            hyps.append(PragmaticHypothesis("PH0A", "self_identity",
+                "用户想了解 AM 的身份", confidence=0.9))
+
+        # H0B: 问候/告别
+        if any(w in text for w in ('你好', 'hello', 'hi', '嗨', '您好', '再见', '拜拜', 'bye', '晚安', '早安')):
+            hyps.append(PragmaticHypothesis("PH0", "social_ritual",
+                "用户在进行问候", confidence=0.85))
+
+        # H1: 知识询问 (用户想知道某个事实)
+        if struct.get("question") and struct.get("predicate") in ("IS_A", "CAN", "DOES", "ORBITS"):
+            hyps.append(PragmaticHypothesis("PH1", "info_request",
+                f"用户想确认「{struct.get('subject')}」是否「{struct.get('predicate')} {struct.get('object')}」",
+                confidence=0.7, reasoning="结构含疑问标记+关系词"))
+
+        # H2: 能力探测 (用户在测试系统边界)
+        if any(w in text for w in ('你', '会', '能', '做什么', '能力', '了解', '知道')):
+            hyps.append(PragmaticHypothesis("PH2", "capability_check",
+                "用户在探索 AM 的能力边界", confidence=0.6,
+                reasoning="含自我指涉词+能力词"))
+
+        # H3: 社交仪式 (问候/闲聊/试探关系)
+        if len(text) <= 6 or structural.confidence < 0.4:
+            hyps.append(PragmaticHypothesis("PH3", "social_ritual",
+                "用户可能在建立/维持社交关系", confidence=0.4,
+                reasoning="短文本或低结构置信度"))
+
+        # H4: 教学意图 (用户想教 AM 新知识)
+        if any(w in text for w in ('learn', 'answer', '你记住', '记一下')):
+            hyps.append(PragmaticHypothesis("PH4", "teach",
+                "用户想向 AM 传授知识", confidence=0.8,
+                reasoning="含教学触发词"))
+
+        # H5: 单纯闲聊
+        if structural.confidence < 0.5:
+            hyps.append(PragmaticHypothesis("PH5", "casual_chat",
+                "用户可能只是随便聊聊", confidence=0.5,
+                reasoning="无法建立高置信度结构"))
+
+        if not hyps:
+            hyps.append(PragmaticHypothesis("PH6", "unknown",
+                "无法确定用户意图", confidence=0.3))
+
+        return sorted(hyps, key=lambda h: h.confidence, reverse=True)
+
+
+# ═══════════════════════════════════════
+#  ActionIntentEngine (保留现有功能)
+# ═══════════════════════════════════════
+
+class ActionIntentEngine:
+    """
+    层三: "执行什么动作?"
+
+    这是旧 IntentLayer 中的命令路由部分——保留, 但移到最后。
+
+    只在 Semantic + Pragmatic 无法确定时作为兜底。
+    """
+
+    COMMANDS = {
+        'learnw': ('learn_word', 0.9),
+        'readcn': ('read_chinese', 0.9),
+        'answer': ('user_teach', 0.9),
+        '以后我': ('set_preference', 0.9),
+    }
+
+    def detect(self, text: str) -> Optional[dict]:
+        """检测是否是明确的命令操作"""
+        for prefix, (action, conf) in self.COMMANDS.items():
+            if text.startswith(prefix):
+                return {"action": action, "confidence": conf, "command": text}
+        return None
+
+
+# ═══════════════════════════════════════
+#  Cognitive Interface (总入口)
+# ═══════════════════════════════════════
+
+class CognitiveInterface:
+    """
+    AM 的感官层——不是路由表, 是三个引擎的管道。
+
+    输入 → Semantic → Pragmatic → Action → Cognitive Core
+    """
+
+    def __init__(self, kg=None, db=None):
+        self.kg = kg
+        self.db = db
+        self.semantic = SemanticHypothesisEngine(kg, db)
+        self.pragmatic = PragmaticIntentEngine(kg)
+        self.action = ActionIntentEngine()
+
+        # 注册: 已学到的语言原语
+        self._load_kg_primitives()
+
+    def _load_kg_primitives(self):
+        """从 KG 加载已知的语言原语词性"""
+        if not self.kg: return
+        for r in self.kg.relations:
+            if r.predicate in ("IS_A", "MEANS"):
+                obj = r.object.lower() if r.object else ""
+                if "系动词" in obj or "copula" in obj:
+                    self.semantic.primitive_registry[r.subject] = "Relation"
+                elif "疑问" in obj or "question" in obj:
+                    self.semantic.primitive_registry[r.subject] = "Question"
+                elif "否定" in obj or "negation" in obj:
+                    self.semantic.primitive_registry[r.subject] = "Negation"
+                elif "时间" in obj or "time" in obj:
+                    self.semantic.primitive_registry[r.subject] = "Time"
+                elif "助词" in obj or "量词" in obj or "冠词" in obj or "article" in obj:
+                    self.semantic.primitive_registry[r.subject] = "Attribute"
+
+    def process(self, text: str, context: dict = None) -> dict:
+        """
+        完整认知接口管道。
+
+        返回:
+          { action, reply, reasoning, semantic, pragmatic, explanation }
+        """
+        result = {
+            "action": "unknown",
+            "reply": "",
+            "reasoning": [],
+            "semantic": None,
+            "pragmatic": None,
+            "explanation": [],
+        }
+
+        # ── 层一: Semantic — "他说了什么?" ──
+        struct_hyps = self.semantic.hypothesize(text)
+        best_struct = struct_hyps[0] if struct_hyps else None
+        result["semantic"] = best_struct
+        if best_struct:
+            result["reasoning"].append(f"结构:H={best_struct.desc()} ({best_struct.confidence:.0%})")
+
+        # ── 层二: Pragmatic — "为什么说?" ──
+        if best_struct:
+            prag_hyps = self.pragmatic.hypothesize(best_struct, context)
+            best_prag = prag_hyps[0] if prag_hyps else None
+            result["pragmatic"] = best_prag
+            if best_prag:
+                result["reasoning"].append(f"意图:{best_prag.label} ({best_prag.confidence:.0%})")
+                result["action"] = best_prag.type
+
+        # ── 层三: Action — 命令路由 (兜底) ──
+        cmd = self.action.detect(text)
+        if cmd:
+            result["action"] = cmd["action"]
+
+        # ── 构建解释链 ──
+        result["explanation"] = result["reasoning"].copy()
+
+        return result
+
+    def generate_reply(self, result: dict) -> str:
+        """根据语义+语用+认知结果, 生成回复"""
+        sem = result.get("semantic")
+        prag = result.get("pragmatic")
+
+        # KG 查询: 是否有已知事实
+        kg_hits = []
+        if sem and sem.structure.get("subject") and self.kg:
+            subj = sem.structure["subject"]
+            obj = sem.structure.get("object")
+            for r in self.kg.relations:
+                if r.subject == subj and r.confidence > 0.5:
+                    kg_hits.append(r)
+
+        if prag:
+            if prag.type == "capability_check":
+                facts = self.db.count() if self.db else 0
+                return f"我可以: 📚 {facts} 条知识、🧩 推理引擎。你想让我学什么?"
+            if prag.type == "self_identity":
+                name = "AsteriaMind"
+                role = "一个正在进化的认知系统"
+                if self.kg:
+                    for r in self.kg.relations:
+                        if r.subject == "我" and r.predicate == "MEANS": name = r.object
+                        if r.subject == "我" and r.predicate == "IS_A": role = r.object
+                return f"我是 {name}, {role}。是你在培养的 AI。"
+            if prag.type == "info_request":
+                if kg_hits:
+                    lines = [f"  · {r.subject} --[{r.predicate}]--> {r.object}" for r in kg_hits[:5]]
+                    return "关于这个我知道:\n" + "\n".join(lines)
+                return "关于这个我还不知道。你能教我吗?"
+            if prag.type == "social_ritual":
+                return "你好呀~ 🌻"
+            if prag.type == "teach":
+                return "好的, 我在听! 你想教我什么?"
+
+        return "我记下了。试试更具体地说?"

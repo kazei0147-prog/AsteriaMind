@@ -41,7 +41,7 @@ from AsteriaMind.skill_library import build_default_skills
 from AsteriaMind.knowledge_db import KnowledgeDB
 from AsteriaMind.falsification import WebSearchInterface
 from AsteriaMind.conversation_memory import ConversationMemory
-from AsteriaMind.intent_layer import IntentLayer, IntentHypothesis
+from AsteriaMind.cognitive_interface import CognitiveInterface
 
 # ── AM 初始化 ──
 kg = KnowledgeGraph()
@@ -52,7 +52,7 @@ for t in _builtin_templates(): reg.register(t)
 skill_lib = build_default_skills()
 mr = MathReasoner()
 web_search = WebSearchInterface()
-intent_layer = IntentLayer(kg, db)
+ci = CognitiveInterface(kg, db)
 
 # 从 DB 恢复已有知识
 for r in db.query():
@@ -277,57 +277,28 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
     def _process(self, text: str, context: str = None) -> tuple[str, str]:
         """
-        ── 意图理解层 ──
-        不再是 if-else 路由链。
-        输入 → IntentLayer.understand() → 意图假说 → 认知系统查询 → 动态回复
+        ── Cognitive Interface Layer ──
+        Semantic → Pragmatic → Action → 回复
         """
-        # 命令路由 (learnw/readcn/answer — 这些是元操作, 保留)
+        # 命令: learnw/readcn/answer/偏好教学 (保留)
         if text.startswith(('learnw ', 'readcn ', 'answer ', '以后我')):
             return self._process_legacy(text)
 
-        # IntentLayer: 语义→假说→评分→选择
-        intent = intent_layer.understand(text)
-
-        # fact_learn: 先存 KG
-        if intent.type == "fact_learn":
-            self._store_from_intent(intent)
-            return (f"✅ 学会了: {intent.parsed or intent.text}", "learn_fact")
-
-        # math: 调用 math skill
-        if intent.type == "math":
+        # 数学: 保留快速路径
+        if re.search(r'\d\s*[\+\-\*/\^]\s*\d', text):
             m = skill_lib.best_match(text)
             if m:
                 r = m.execute(text, kg)
                 if r.get("success"):
                     return (f"🧮 {r.get('result')}", "math")
-            return ("❓ 这题我算不出来", "math_fail")
 
-        # 意图→认知系统→回复
-        reply = intent_layer.execute(intent)
-        return (reply, intent.type)
+        # 三层管道: Semantic → Pragmatic → 回复
+        result = ci.process(text)
+        reply = ci.generate_reply(result)
+        return (reply, result.get("action", "unknown"))
 
-    def _store_from_intent(self, intent: IntentHypothesis):
-        """从意图假说提取三元组存入 KG"""
-        text = intent.text
-        # X是Y
-        m = re.search(r'([\u4e00-\u9fff\w]{1,15})是([\u4e00-\u9fff\w]{1,20})', text)
-        if m and m.group(1) not in ('这','那','它','你','我'):
-            kg.add(m.group(1), "IS_A", m.group(2), confidence=0.7)
-            db.add_relation(m.group(1), "IS_A", m.group(2), 0.7, source="intent")
-        # X会Y
-        m = re.search(r'([\u4e00-\u9fff\w]{1,15})(?:会|能)([\u4e00-\u9fff\w]{1,20})', text)
-        if m and m.group(1) not in ('这','那','它','你','我'):
-            kg.add(m.group(1), "CAUSES", m.group(2), confidence=0.6)
-            db.add_relation(m.group(1), "CAUSES", m.group(2), 0.6, source="intent")
-        # X绕Y
-        m = re.search(r'([\u4e00-\u9fff\w]{1,10})(?:围绕|绕)([\u4e00-\u9fff\w]{1,10})', text)
-        if m and m.group(1) not in ('这','那','它'):
-            kg.add(m.group(1), "ORBITS", m.group(2), confidence=0.7)
-            db.add_relation(m.group(1), "ORBITS", m.group(2), 0.7, source="intent")
-        _auto_export()
-
-        # ── 0. 教学命令路由 (优先级最高) ──
-        # learnw <词> [同义词 <词>]
+    def _process_legacy(self, text: str) -> tuple[str, str]:
+        """命令路由: learnw / readcn / answer / 偏好教学"""
         if text.startswith('learnw '):
             parts = text[7:].strip().split(None, 2)
             if len(parts) == 1:
