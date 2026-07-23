@@ -78,6 +78,138 @@ class PragmaticHypothesis:
 
 
 # ═══════════════════════════════════════
+#  关系假说 (Relation Hypothesis)
+# ═══════════════════════════════════════
+
+@dataclass
+class RelationHypothesis:
+    """一个关系词可能有多种解释 — 每个候选是一种假说"""
+    word: str               # 原始关系词, 如 "绕" / "属于" / "会"
+    candidate_type: str     # 候选关系类型: IS_A / ORBITS / CAUSES / CAN / DOES / RELATED
+    confidence: float = 0.5
+    evidence: list[str] = field(default_factory=list)
+    reasoning: str = ""
+
+
+class RelationHypothesisEngine:
+    """
+    关系假说引擎 — 不是 "属于=IS_A" 的死映射表。
+
+    输入: 一个关系词 ("会")
+    输出: 多个假说
+      H1: CAN (0.7) — KG里"会 IS_A 助动词"
+      H2: CAUSES (0.2) — 也可能是因果
+      H3: RELATED (0.1) — 兜底
+    """
+
+    # 语言无关系类型枚举
+    RELATION_TYPES = ["IS_A", "ORBITS", "CAUSES", "CAN", "DOES", "HAS", "LOCATED_AT", "RELATED"]
+
+    def __init__(self, kg=None):
+        self.kg = kg
+        # 从 KG 学习的同义映射 (动态增长, 不硬编码)
+        self.synonym_map: dict[str, dict[str, float]] = {}
+
+    def hypothesize(self, word: str, context_entities: list[str] = None) -> list[RelationHypothesis]:
+        """
+        为一个关系词生成多个候选解释。
+
+        优先级:
+          1. KG 直接存储: 绕 IS_A 关系词 → 关系词映射
+          2. KG 同义映射: 绕 SYNONYM_OF ORBITS → 直接映射
+          3. 语法知识: 绕 MEANS 关系词 → 候选=ORBITS/RELATED
+          4. 启发式降级
+        """
+        hyps = []
+
+        # ── 路径1: KG 直接查询 ──
+        if self.kg:
+            for r in self.kg.relations:
+                if r.subject != word:
+                    continue
+                obj = r.object.lower() if r.object else ""
+
+                # 同义词直接映射
+                if r.predicate == "IS_SYNONYM":
+                    if obj.upper() in self.RELATION_TYPES:
+                        hyps.append(RelationHypothesis(word, obj.upper(), 0.85,
+                            [f"KG同义词: {word} SYNONYM_OF {obj}"],
+                            f"直接同义映射: {word} → {obj}"))
+
+                # 词性知识 → 推测关系类型
+                if r.predicate in ("MEANS", "IS_A"):
+                    types_from_kg = self._infer_from_word_type(obj)
+                    for t, conf in types_from_kg:
+                        hyps.append(RelationHypothesis(word, t, conf,
+                            [f"KG词性: {word} {r.predicate} {r.object}"],
+                            f"从词性推断: {obj} → {t}"))
+
+        # ── 路径2: 结构启发式 ──
+        heuristic = self._heuristic_guess(word, context_entities)
+        if heuristic:
+            hyps.extend(heuristic)
+
+        # ── 兜底 ──
+        if not hyps:
+            hyps.append(RelationHypothesis(word, "RELATED", 0.3,
+                [], "无法确定关系类型, 兜底"))
+
+        return sorted(hyps, key=lambda h: h.confidence, reverse=True)
+
+    def _infer_from_word_type(self, word_type: str) -> list[tuple[str, float]]:
+        """从 KG 存储的词性描述推断关系类型"""
+        results = []
+        wt = word_type.lower()
+
+        if any(k in wt for k in ("系动词", "copula", "linking")):
+            results.append(("IS_A", 0.8))
+        if any(k in wt for k in ("因果", "cause", "导致")):
+            results.append(("CAUSES", 0.8))
+        if any(k in wt for k in ("围绕", "orbit", "环绕")):
+            results.append(("ORBITS", 0.8))
+        if any(k in wt for k in ("助动词", "auxiliary", "能力", "ability")):
+            results.append(("CAN", 0.7))
+            results.append(("DOES", 0.4))  # 次级候选
+        if any(k in wt for k in ("属于", "belong")):
+            results.append(("IS_A", 0.75))
+            results.append(("BELONGS_TO", 0.65)) if "belong" in wt else None
+        if any(k in wt for k in ("位置", "located", "位于")):
+            results.append(("LOCATED_AT", 0.8))
+        if any(k in wt for k in ("关系", "relation")):
+            results.append(("ORBITS", 0.5))
+            results.append(("RELATED", 0.4))
+        if any(k in wt for k in ("拥有", "has", "possess")):
+            results.append(("HAS", 0.8))
+
+        return results
+
+    def _heuristic_guess(self, word: str, entities: list[str] = None) -> list[RelationHypothesis]:
+        """降级启发式: 当 KG 没有词性信息时的位置/字符猜测"""
+        hyps = []
+
+        # 连词 (和/或) → 单个实体处理, 不是关系
+        if word in ('和', '或', '与', 'and', 'or'):
+            return []
+
+        # 单字关系词常见映射
+        if word in ('是', '为'):
+            hyps.append(RelationHypothesis(word, "IS_A", 0.6, [], "常见系词"))
+        elif word in ('绕',):
+            hyps.append(RelationHypothesis(word, "ORBITS", 0.5, [], "常见轨道词"))
+        elif word in ('会', '能', '可以'):
+            hyps.append(RelationHypothesis(word, "CAN", 0.5, [], "常见助动词"))
+            hyps.append(RelationHypothesis(word, "DOES", 0.3, [], "也可能是一般动作"))
+        elif word in ('在', '于'):
+            hyps.append(RelationHypothesis(word, "LOCATED_AT", 0.5, [], "常见位置词"))
+        elif word in ('有',):
+            hyps.append(RelationHypothesis(word, "HAS", 0.5, [], "常见拥有词"))
+        else:
+            hyps.append(RelationHypothesis(word, "RELATED", 0.3, [], "未知关系词"))
+
+        return hyps
+
+
+# ═══════════════════════════════════════
 #  SemanticHypothesisEngine
 # ═══════════════════════════════════════
 
@@ -85,76 +217,115 @@ class SemanticHypothesisEngine:
     """
     层一: "他说了什么?"
 
-    不是确定解析——是生成多个结构假说，给 KG 去验证。
-
-    输入: "猫是动物吗"
-    输出: [H1: (猫,IS_A,动物,query) 0.85, H2: (猫,=,动物) 0.05, H3: statement 0.10]
+    v0.3: Entity Boundary Resolver + Relation Hypothesis Engine → 多候选组合。
     """
 
     def __init__(self, kg=None, db=None):
         self.kg = kg
         self.db = db
-        self.patterns: list[dict] = []      # 已注册的语言模式
-        self.primitive_registry: dict[str, str] = {}  # token → category
+        self.patterns: list[dict] = []
+        self.primitive_registry: dict[str, str] = {}
+        self.relation_engine = RelationHypothesisEngine(kg)
 
     def hypothesize(self, text: str) -> list[StructuralHypothesis]:
-        """生成结构假说列表"""
+        """
+        生成结构假说——多实体+多关系候选组合。
+
+        思考显性化: 每个假说附带 evidence 和 reasoning trace。
+        """
         hypotheses = []
         primitives = self._extract_primitives(text)
 
-        # ── 从原语中提取关键 token ──
+        # 分类
         entities = [p for p in primitives if p.category == "Entity"]
-        relations = [p for p in primitives if p.category == "Relation"]
+        relation_words = [p for p in primitives if p.category == "Relation"]
         questions = [p for p in primitives if p.category == "Question"]
+        negations = [p for p in primitives if p.category == "Negation"]
+        perspectives = [p for p in primitives if p.category == "Perspective"]
 
-        # ── H1: 三元组结构 (Entity-Relation-Entity/Attribute) ──
-        if entities and relations:
-            subj = entities[0].token
-            pred = relations[0].token
-            # 找第二个实体或属性
-            obj = entities[1].token if len(entities) > 1 else ""
-            if not obj:
-                attrs = [p for p in primitives if p.category == "Attribute"]
-                obj = attrs[0].token if attrs else ""
-            is_question = bool(questions)
+        is_question = bool(questions)
+        is_negated = bool(negations)
 
-            if obj:
-                # 查 KG: 这个关系词是不是已知系动词?
-                rel_type = self._guess_relation_type(pred)
-                h1 = StructuralHypothesis(
-                    "SH1", text,
-                    structure={"subject": subj, "predicate": rel_type, "object": obj,
-                               "question": is_question, "negated": False, "perspective": "user"},
-                    confidence=0.75 if obj else 0.5,
-                    evidence=[f"primitive_extraction: {[(p.token,p.category) for p in primitives]}"],
-                    reasoning=f"实体序列:{subj},{pred},{obj}" + (" 含疑问标记" if is_question else "")
-                )
-                hypotheses.append(h1)
-
-        # ── H2: 简单陈述 ──
-        if entities and not relations:
-            h2 = StructuralHypothesis(
-                "SH2", text,
-                structure={"subject": entities[0].token, "predicate": "IS_TOPIC",
-                           "object": None, "question": bool(questions), "negated": False, "perspective": "user"},
-                confidence=0.3,
-                evidence=["single_entity"],
-                reasoning="单实体, 可能只是提出话题"
-            )
-            hypotheses.append(h2)
-
-        # ── H3: 无结构——无法解析 ──
-        if not hypotheses:
-            h3 = StructuralHypothesis(
-                "SH3", text,
+        if not entities and not relation_words:
+            h = StructuralHypothesis("SH0", text,
                 structure={"subject": None, "predicate": "UNPARSED", "object": None,
-                           "question": bool(questions), "negated": False, "perspective": "user"},
-                confidence=0.1,
-                reasoning="无法从原语构建结构"
+                           "question": is_question, "negated": is_negated, "perspective": "user"},
+                confidence=0.1, reasoning="无法提取实体或关系")
+            hypotheses.append(h)
+            return hypotheses
+
+        # ── 实体列表 ──
+        entity_names = [e.token for e in entities]
+        if len(entity_names) == 0:
+            entity_names = [text]  # 整句当实体
+
+        subject = entity_names[0]
+
+        # ── 为每个关系词生成候选关系类型 ──
+        all_relation_hyps = []
+        for rw in relation_words:
+            rhyps = self.relation_engine.hypothesize(rw.token, entity_names)
+            all_relation_hyps.extend(rhyps)
+
+        if not all_relation_hyps:
+            # 无关系词 → 单实体
+            h = StructuralHypothesis("SH1", text,
+                structure={"subject": subject, "predicate": "IS_TOPIC", "object": None,
+                           "question": is_question, "negated": is_negated,
+                           "perspective": perspectives[0].token if perspectives else "user"},
+                confidence=0.3,
+                evidence=[f"entities={entity_names}"],
+                reasoning="单实体, 无关系词")
+            hypotheses.append(h)
+            return sorted(hypotheses, key=lambda h: h.confidence, reverse=True)
+
+        # ── 实体+关系组合: 为每个关系候选生成结构假说 ──
+        obj = entity_names[1] if len(entity_names) > 1 else None
+
+        for rh in all_relation_hyps[:5]:  # 最多 5 个候选
+            h = StructuralHypothesis(
+                f"SH_{rh.candidate_type}",
+                text,
+                structure={
+                    "subject": subject,
+                    "predicate": rh.candidate_type,
+                    "object": obj,
+                    "question": is_question,
+                    "negated": is_negated,
+                    "perspective": perspectives[0].token if perspectives else "user",
+                },
+                confidence=rh.confidence,
+                evidence=[f"entity={subject}", f"relation_word={rh.word}",
+                          f"relation_candidate={rh.candidate_type}"] + rh.evidence,
+                reasoning=rh.reasoning
             )
-            hypotheses.append(h3)
+
+            # ── KG 验证: 如果实体和关系在 KG 中存在，加权 ──
+            if self.kg and obj:
+                kg_boost = self._validate_against_kg(subject, rh.candidate_type, obj)
+                h.confidence = min(0.95, h.confidence + kg_boost)
+                if kg_boost > 0.05:
+                    h.evidence.append(f"KG验证: +{kg_boost:.2f}")
+
+            hypotheses.append(h)
 
         return sorted(hypotheses, key=lambda h: h.confidence, reverse=True)
+
+    def _validate_against_kg(self, subject: str, predicate: str, obj: str) -> float:
+        """KG 验证: 查找是否有支持证据"""
+        if not self.kg:
+            return 0.0
+        boost = 0.0
+        # 精确匹配
+        for r in self.kg.relations:
+            if r.subject == subject and r.predicate == predicate and r.object == obj:
+                boost += 0.15
+            # 传递推理: subject IS_A something, something IS_A obj
+            if predicate == "IS_A":
+                for r2 in self.kg.relations:
+                    if r.subject == subject and r.predicate == "IS_A" and r.object == r2.subject and r2.predicate == "IS_A" and r2.object == obj:
+                        boost += 0.1
+        return boost
 
     def _resolve_entity_boundaries(self, text: str) -> list[str]:
         """
@@ -511,8 +682,13 @@ class CognitiveInterface:
         struct_hyps = self.semantic.hypothesize(text)
         best_struct = struct_hyps[0] if struct_hyps else None
         result["semantic"] = best_struct
+        result["semantic_candidates"] = [h.desc() for h in struct_hyps[:3]]
         if best_struct:
-            result["reasoning"].append(f"结构:H={best_struct.desc()} ({best_struct.confidence:.0%})")
+            result["reasoning"].append(f"结构:{best_struct.desc()} ({best_struct.confidence:.0%})")
+            # 思考显性化
+            for ev in best_struct.evidence:
+                result["explanation"].append(f"  · {ev}")
+            result["explanation"].append(f"  ⇒ {best_struct.reasoning}")
 
         # ── 层二: Pragmatic — "为什么说?" ──
         if best_struct:
