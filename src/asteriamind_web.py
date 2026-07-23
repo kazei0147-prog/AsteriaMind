@@ -257,9 +257,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             if len(parts) >= 2:
                 return self._cmd_answer(parts[0], parts[1])
         # 以后我<条件>你就<行为> (个性化教学)
-        m = re.search(r'^以后我(.+?)你就(.+)$', text)
+        m = re.search(r'^以后我(?:说|)?(.+?)你就(.+)$', text)
         if m:
             condition, action = m.group(1).strip(), m.group(2).strip()
+            # 清理: "说再见"→"再见", "夸你"→"夸"
+            condition = re.sub(r'^(说|讲|叫)', '', condition)
             kg.add(condition, "REPLIES_WITH", action, confidence=0.9)
             db.add_relation(condition, "REPLIES_WITH", action, 0.9, source="user_preference")
             _auto_export()
@@ -289,19 +291,28 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             return ("好的, 我在听。有什么想告诉我的吗?", "ack")
 
         # ── 3. 元语句/对话——不该学 ──
-        if any(text.startswith(p) for p in ['你', '我', '我们', '咱', '为什么', '怎么', '请问', '谢谢', '感谢']):
+        if any(text.startswith(p) for p in ['你', '您', '我', '我们', '咱', '为什么', '怎么', '请问', '谢谢', '感谢']):
             if '你' in text and ('吗' in text or '?' in text or '？' in text or '吧' in text):
                 return self._conversational_reply(text)
-            if text in ['你好', 'hello', 'hi', '嗨', '您好']:
-                # 如果用户教过打招呼偏好, 用教的
+            # 问候语: 优先查偏好, 不再硬编码单一回复
+            greeting_keywords = ['你好', 'hello', 'hi', '嗨', '您好', '早上好', '晚上好', 'hey', '在吗', '在不在', '早上', '晚安']
+            if any(kw in text for kw in greeting_keywords):
                 for r in kg.relations:
-                    if r.predicate == "REPLIES_WITH" and ("招呼" in r.subject or "你好" in r.subject):
+                    if r.predicate == "REPLIES_WITH" and ("招呼" in r.subject or "你好" in r.subject or "您好" in r.subject or "greeting" in r.subject.lower()):
                         return (r.object, "pref_reply")
-                return ("你好! 我是 AsteriaMind。你可以说: 'X是Y' / 'X会导致Y' / '2+3=?'", "greeting")
+                # 无偏好 → 丰富的默认回复池
+                replies = [
+                    "你好! 我是 AsteriaMind 🌻 今天想聊什么?",
+                    "嗨! 我在呢。告诉我有趣的事?",
+                    "早上好呀~ 有什么想和我说的?",
+                    "在呢! 说吧, 我听着。",
+                ]
+                return (replies[hash(text) % len(replies)], "greeting")
             if '谢谢' in text or '感谢' in text:
                 for r in kg.relations:
                     if r.predicate == "REPLIES_WITH" and ("谢" in r.subject or "thank" in r.subject.lower()):
                         return (r.object, "pref_reply")
+                return (["不客气 🙂", "没事, 应该的!", "随时为你效劳~"][hash(text) % 3], "thanks")
                 return ("不客气 🙂", "thanks")
             # 其他元语句: 对话回复, 不强学
             return self._conversational_reply(text)
@@ -367,11 +378,17 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
     def _conversational_reply(self, text: str) -> tuple[str, str]:
         """对话回复——用户教的偏好优先, 再默认"""
-        # 1. 查用户教的偏好 (最高优先级)
+        # 1. 查用户教的偏好 — 词级匹配 (避免"你"字符误匹配)
         for r in kg.relations:
             if r.predicate == "REPLIES_WITH":
-                if r.subject in text or any(kw in r.subject for kw in text.split()):
+                pref = r.subject
+                # 精确: 偏好词出现在文本中, 或文本词出现在偏好中(双字以上)
+                if pref in text:
                     return (r.object, "pref_reply")
+                # 反向: 文本中的2字以上词在偏好里
+                for ch in re.findall(r'[\u4e00-\u9fff]{2,}', text):
+                    if ch in pref and len(ch) >= 2:
+                        return (r.object, "pref_reply")
         # 2. 同义词展开
         for r in kg.relations:
             if r.predicate == "IS_SYNONYM" and r.subject in text:
@@ -382,13 +399,18 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if '你好' in text or 'hello' in text.lower():
             return ("你好! 有什么想告诉我的吗?", "greeting")
         if '你是谁' in text or '你叫什么' in text:
-            return ("我是 AsteriaMind, 一个不断进化的认知系统 🧠", "intro")
+            return (["我是 AsteriaMind, 一个不断进化的认知系统 🧠", "我叫 AsteriaMind! 是你在培养的 AI。", "我是你一手带大的 AsteriaMind 呀~"][hash(text) % 3], "intro")
         if '你能做什么' in text or '你会什么' in text:
-            return ("我可以: 学习事实 (X是Y) / 回答问题 / 做数学 / 搜索 (需要联网) / 自主进化", "capabilities")
+            return ("我可以: 学习事实 / 回答提问 / 做数学题 / 搜索信息 / 自己进化。试试告诉我点什么?", "capabilities")
         if '怎么用' in text or '如何用' in text:
-            return ("试: '咖啡是饮料' / '地球是什么' / '2+3=?', 或输入 help 看命令", "howto")
-        # 默认: 友好提示
-        return (f"我记下了。但你能说得更具体吗? 比如 'X是Y' 或 'X会Y'", "casual")
+            return ("很简单: 'X是Y' 教事实, 'X会Y吗' 问问题, '2+3=?' 算数学, 'learnw X' 学单词, 'readcn 文本' 读中文", "howto")
+        # 默认: 多样化提示
+        defaults = [
+            "我记下了。试试更具体地说? 比如 '鸟是动物' 或 '太阳会发光'",
+            "嗯嗯。想告诉我什么知识吗?",
+            "收到! 你可以教我任何事 😊",
+        ]
+        return (defaults[hash(text) % len(defaults)], "casual")
 
     def _cmd_learn_word(self, word: str) -> tuple[str, str]:
         """learnw: 学习一个词"""
