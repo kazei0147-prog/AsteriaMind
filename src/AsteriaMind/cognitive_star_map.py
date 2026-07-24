@@ -77,7 +77,7 @@ def _effective_weight(row) -> float:
     conf = row[1] if isinstance(row, tuple) else row["confidence"]
     last_up = row[2] if isinstance(row, tuple) else row["last_update"]
     decay = math.exp(-DECAY_LAMBDA * (time.time() - (last_up or 0)) / 86400)  # 按天衰减
-    return weight * conf * decay
+    return float(weight) * float(conf) * float(decay)
 
 
 def _entity_vector(conn, entity: str) -> dict[str, float]:
@@ -89,7 +89,7 @@ def _entity_vector(conn, entity: str) -> dict[str, float]:
         "SELECT entity_b, weight, confidence, last_update FROM co_occurrence WHERE entity_a=? "
         "UNION ALL SELECT entity_a, weight, confidence, last_update FROM co_occurrence WHERE entity_b=?",
         (entity, entity)):
-        w = _effective_weight(row)
+        w = _effective_weight(row[1:])  # row[0] 是实体名, row[1:]= weight,confidence,last_update
         if w > 0.01:
             vec[row[0]] = w
     return vec
