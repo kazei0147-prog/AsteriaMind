@@ -123,6 +123,50 @@ class EmergentVectorStore:
         if '吗' in sentence: return '问句'
         return '陈述'
 
+    def _cooccur_neighbors(self, entities: list[str], top_k: int = 20) -> set[str]:
+        """
+        低频准备: 从共现表快速捞出相关实体。
+
+        "哺乳动物" → [猫, 狗, 海豚, 蝙蝠, ...]
+        不在每次检索时扫全表，只激活局部子图。
+        """
+        neighbors = set(entities)
+        cur = self.conn.cursor()
+        for e in entities:
+            if not e: continue
+            for row in cur.execute(
+                "SELECT entity_b FROM co_occurrence WHERE entity_a=? "
+                "ORDER BY count DESC LIMIT ?", (e, top_k)):
+                neighbors.add(row[0])
+            for row in cur.execute(
+                "SELECT entity_a FROM co_occurrence WHERE entity_b=? "
+                "ORDER BY count DESC LIMIT ?", (e, top_k)):
+                neighbors.add(row[0])
+        return neighbors
+
+    def _indexed_scan(self, qv: dict, activated: set[str]) -> list:
+        """
+        高频局部激活: 只在相关实体的认知痕迹中计算相似度。
+
+        WHERE subj IN (...) OR obj IN (...) → 子图扫描。
+        """
+        if not activated:
+            return []
+        placeholders = ",".join("?" * len(activated))
+        params = list(activated) + list(activated)
+        sql = (f"SELECT id,subj,pred,obj,pattern,feedback FROM cognitive_traces "
+               f"WHERE subj IN ({placeholders}) OR obj IN ({placeholders})")
+        res = []
+        for row in self.conn.execute(sql, params):
+            tv = _query_vector(self.conn, row[1], row[3], row[2])
+            sim = _sparse_cosine(qv, tv)
+            if sim > 0.0:
+                res.append({"id": row[0], "subj": row[1], "pred": row[2],
+                            "obj": row[3], "pattern": row[4], "feedback": row[5],
+                            "similarity": sim})
+        res.sort(key=lambda x: x["similarity"], reverse=True)
+        return res
+
     def store(self, subj: str, pred: str, obj: str,
               feedback: str = "confirmed", text: str = "") -> int:
         """存入认知痕迹 + 语言痕迹 + 更新共现"""
@@ -150,35 +194,17 @@ class EmergentVectorStore:
 
     def query_similar(self, text: str = "", subj: str = "", pred: str = "",
                       obj: str = "", top_k: int = 5) -> list:
-        """共现向量检索"""
+        """共现索引检索 —— 低频准备 + 高频局部激活"""
         qv = _query_vector(self.conn, subj, obj, pred)
-        res = []
-        for row in self.conn.execute(
-            "SELECT id,subj,pred,obj,pattern,feedback FROM cognitive_traces"):
-            tv = _query_vector(self.conn, row[1], row[3], row[2])
-            sim = _sparse_cosine(qv, tv)
-            if sim > 0.0:
-                res.append({"id": row[0], "subj": row[1], "pred": row[2],
-                            "obj": row[3], "pattern": row[4], "feedback": row[5],
-                            "similarity": sim})
-        res.sort(key=lambda x: x["similarity"], reverse=True)
-        return res[:top_k]
+        activated = self._cooccur_neighbors([subj, obj, pred])
+        return self._indexed_scan(qv, activated)[:top_k]
 
     def predict_feedback(self, text: str = "", subj: str = "", pred: str = "",
                          obj: str = "") -> tuple[str, float, list]:
-        """共现预测反馈"""
+        """共现索引预测 —— 只在激活子图中运算"""
         qv = _query_vector(self.conn, subj, obj, pred)
-        similar = []
-        for row in self.conn.execute(
-            "SELECT id,subj,pred,obj,pattern,feedback FROM cognitive_traces"):
-            tv = _query_vector(self.conn, row[1], row[3], row[2])
-            sim = _sparse_cosine(qv, tv)
-            if sim > 0.0:
-                similar.append({"id": row[0], "subj": row[1], "pred": row[2],
-                                "obj": row[3], "pattern": row[4], "feedback": row[5],
-                                "similarity": sim})
-        similar.sort(key=lambda x: x["similarity"], reverse=True)
-        similar = similar[:10]
+        activated = self._cooccur_neighbors([subj, obj, pred])
+        similar = self._indexed_scan(qv, activated)[:10]
         if not similar:
             return ("unknown", 0.0, [])
         fc = {"confirmed": 0.0, "corrected": 0.0}
@@ -195,9 +221,12 @@ class EmergentVectorStore:
         """共现 + 语言统一检索 → 涌现回复"""
         pf, conf, ev = self.predict_feedback(text, subj, pred, obj)
         qv = _query_vector(self.conn, subj, obj, pred)
+        activated = self._cooccur_neighbors([subj, obj, pred])
         lang = []
-        for row in self.conn.execute(
-            "SELECT sentence,pattern_type,subj,obj FROM language_traces"):
+        placeholders = ",".join("?" * len(activated))
+        sql = (f"SELECT sentence,pattern_type,subj,obj FROM language_traces "
+               f"WHERE subj IN ({placeholders}) OR obj IN ({placeholders})")
+        for row in self.conn.execute(sql, list(activated) + list(activated)):
             tv = _query_vector(self.conn, row[2], row[3], "")
             sim = _sparse_cosine(qv, tv)
             if sim > 0.0:
