@@ -1,5 +1,5 @@
 """
-EmergentVectorStore — 统一星图 v3 (共现引擎 + 语言涌现)
+CognitiveStarMap — 统一星图 v3 (共现引擎 + 语言涌现)
 
 v3: 统计共近代替代字符哈希。
 认知痕迹 → 自动构建共现矩阵 → 稀疏向量 → 相似检索。
@@ -78,10 +78,10 @@ def _sparse_cosine(v1: dict[str, int], v2: dict[str, int]) -> float:
 
 
 # ═══════════════════════════════════════
-#  EmergentVectorStore
+#  CognitiveStarMap
 # ═══════════════════════════════════════
 
-class EmergentVectorStore:
+class CognitiveStarMap:
     """统一星图——共现向量 + 语言涌现"""
 
     def __init__(self, db_path: str = "asteriamind.db"):

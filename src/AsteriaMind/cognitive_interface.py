@@ -598,8 +598,8 @@ class CognitiveInterface:
         self.pragmatic = PragmaticIntentEngine(kg)
         self.action = ActionIntentEngine()
         # EmergentVectorStore: 反馈驱动的认知痕迹 (替代硬标签符号)
-        from AsteriaMind.emergent_vector_store import EmergentVectorStore
-        self.vector_store = EmergentVectorStore()
+        from AsteriaMind.cognitive_star_map import CognitiveStarMap
+        self.cognitive_star_map = CognitiveStarMap()
 
         # 注册: 已学到的语言原语
         self._load_kg_primitives()
@@ -691,11 +691,11 @@ class CognitiveInterface:
             subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
             if subj and pred and obj:
                 # 同时存向量痕迹 + KG (双写过渡期)
-                self.vector_store.store(subj, pred, obj, "confirmed", text)
+                self.cognitive_star_map.store(subj, pred, obj, "confirmed", text)
                 if self.kg and self.db:
                     self.kg.add(subj, pred, obj, confidence=0.7)
                     self.db.add_relation(subj, pred, obj, 0.7, source="web")
-                traces = self.vector_store.count()
+                traces = self.cognitive_star_map.count()
             return f"✅ 学会了: {subj} {pred} {obj}\n💫 星图已归档 ({traces} 条认知痕迹)"
 
         if prag:
@@ -704,7 +704,7 @@ class CognitiveInterface:
                     s = sem.structure
                     subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
                     # 统一星图查询: 认知 + 语言同时检索
-                    er = self.vector_store.emergent_reply(text, subj, pred, obj)
+                    er = self.cognitive_star_map.emergent_reply(text, subj, pred, obj)
                     return er["reply"]
 
             if prag.type == "self_directed":
