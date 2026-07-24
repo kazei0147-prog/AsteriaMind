@@ -601,6 +601,10 @@ class CognitiveInterface:
         from AsteriaMind.cognitive_star_map import CognitiveStarMap
         self.cognitive_star_map = CognitiveStarMap()
 
+        # Mother v3: 认知调度主循环
+        from AsteriaMind.mother_controller import MotherController
+        self.mother = MotherController(self.cognitive_star_map, kg, db)
+
     def consolidate(self) -> dict:
         """触发记忆巩固——后台低频调用"""
         from AsteriaMind.memory_consolidation import MemoryConsolidation

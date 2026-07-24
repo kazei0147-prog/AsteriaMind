@@ -292,9 +292,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if r.get("success"):
                     return (f"🧮 {r.get('result')}", "math")
 
-        # 三层管道: Semantic → Pragmatic → 回复
+        # Mother v3 主循环: Semantic → Pragmatic → AI → MetaCognition
         result = ci.process(text)
-        reply = ci.generate_reply(result, text)
+        loop = ci.mother.loop(result.get("semantic"), result.get("pragmatic"), text)
+        reply = loop.get("reply", "?")
+        action = loop.get("action", "unknown")
         return (reply, result.get("action", "unknown"))
 
     def _process_legacy(self, text: str) -> tuple[str, str]:
