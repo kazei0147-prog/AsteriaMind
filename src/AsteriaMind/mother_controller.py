@@ -108,7 +108,7 @@ class MotherController:
     """
 
     def __init__(self, star_map=None, kg=None, db=None, active_learner=None,
-                 reflector=None):
+                 reflector=None, lang_gen=None):
         self.star_map = star_map
         self.kg = kg
         self.db = db
@@ -118,6 +118,15 @@ class MotherController:
         self.meta_cognition = MetaCognition()
         self.meta_reasoning = MetaReasoningLayer()
         self.round_count = 0
+
+        # v3.4: 语料库驱动的语言生成器
+        if lang_gen:
+            self.lang_gen = lang_gen
+        else:
+            from AsteriaMind.language_generator import LanguageGenerator
+            self.lang_gen = LanguageGenerator(star_map)
+            # 冷启动种子: 把当前模板 → 语料库初始数据
+            self.lang_gen.seed_corpus_from_templates()
 
     def loop(self, semantic_result: dict, pragmatic_result: dict,
              text: str, reflection_ctx: dict = None) -> dict:
@@ -253,8 +262,31 @@ class MotherController:
         planned = self._plan_proactive_actions(subj, pred, obj, top_k=2)
         cognitive_output["planned_actions"] = planned
 
-        # ── 4. 语言生成: 从结构到文本 ──
-        reply = _structure_to_language(cognitive_output)
+        # ── 4. 语言生成: 语料库驱动 (v3.4) ──
+        reply = self.lang_gen.generate(cognitive_output)
+
+        # ── 4.1. 主动推理建议织入 (独立于语言生成) ──
+        planned = cognitive_output.get("planned_actions", [])
+        if planned and planned[0].get("score", 0) > 0.15 and reply:
+            top = planned[0]
+            atype = top.get("action_type", "")
+            if atype in ("explore", "verify"):
+                reply += (
+                    f"\n💡 顺便一提——我注意到「{top['subj']} {top['pred']} {top['obj']}」"
+                    f"还不太确定。需要我查一下吗?"
+                )
+            elif atype == "clarify":
+                reply += (
+                    f"\n🤔 另外, 关于「{top['subj']} {top['pred']} {top['obj']}」"
+                    f"我有些矛盾信息——你能帮我确认吗?"
+                )
+            elif atype == "suggest":
+                reply += (
+                    f"\n📌 我还知道: {top['subj']} {top['pred']} {top['obj']}。"
+                )
+
+        # ── 4.2. 语料库学习: 把生成的回复喂回语料库 ★ v3.4 ★ ──
+        self.lang_gen.learn_from_reply(cognitive_output, reply)
 
         # ── 5. 记录本轮交换 + 构建下轮反馈上下文 ★ v3.3 ★ ──
         new_reflection_ctx = {}

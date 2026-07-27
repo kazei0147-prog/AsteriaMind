@@ -148,6 +148,35 @@ class CognitiveStarMap:
                 CREATE INDEX IF NOT EXISTS idx_ct_pattern ON cognitive_traces(pattern);
                 CREATE INDEX IF NOT EXISTS idx_lt_pattern ON language_traces(pattern_type);
             """)
+        # v3.4: 自动迁移 — 确保新表存在
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='word_cooccur'")
+        if not c.fetchone():
+            c.executescript("""
+                CREATE TABLE IF NOT EXISTS word_cooccur (
+                    word_a TEXT NOT NULL,
+                    word_b TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    context TEXT DEFAULT '',
+                    weight REAL DEFAULT 1.0,
+                    count INTEGER DEFAULT 1,
+                    last_update REAL,
+                    PRIMARY KEY (word_a, word_b, category, context)
+                );
+                CREATE INDEX IF NOT EXISTS idx_wc_ctx ON word_cooccur(category, context);
+
+                CREATE TABLE IF NOT EXISTS lang_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action_type TEXT NOT NULL,
+                    confidence_bucket TEXT NOT NULL,
+                    source TEXT DEFAULT '',
+                    opener TEXT NOT NULL,
+                    body_template TEXT NOT NULL,
+                    closer TEXT NOT NULL,
+                    count INTEGER DEFAULT 1,
+                    last_update REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_lp_action ON lang_patterns(action_type, confidence_bucket);
+            """)
         self.conn.commit()
 
     @staticmethod
@@ -288,6 +317,163 @@ class CognitiveStarMap:
         if predicted == "corrected" and confidence > 0.3:
             return f"不对——「{nearest['subj']} {nearest['pred']} {nearest['obj']}」曾被纠正过。"
         return f"还不太确定 (置信{confidence:.0%})"
+
+    # ═══════════════════════════════════════
+    #  v3.4: 语料库驱动的语言涌现
+    # ═══════════════════════════════════════
+
+    def learn_word_cooccur(self, word_a: str, word_b: str,
+                           category: str, context: str = ""):
+        """v3.4: 记录词级共现——每次生成回复后喂入"""
+        if not word_a or not word_b or word_a == word_b:
+            return
+        if word_a > word_b:
+            word_a, word_b = word_b, word_a
+        ts = time.time()
+        self.conn.execute(
+            "INSERT INTO word_cooccur(word_a,word_b,category,context,weight,count,last_update) "
+            "VALUES(?,?,?,?,1.0,1,?) "
+            "ON CONFLICT(word_a,word_b,category,context) DO UPDATE SET "
+            "count=count+1, weight=weight+1.0, last_update=?",
+            (word_a, word_b, category, context, ts, ts))
+        self.conn.commit()
+
+    def query_word_neighbors(self, word: str, category: str,
+                             context: str = "", top_k: int = 8) -> list[tuple]:
+        """
+        v3.4: 查询与某词最常共现的词。
+
+        例如: query_word_neighbors("学到了", "bigram", "fact_learn")
+              → [("✅", 15), ("📌", 8), ("💡", 5), ...]
+        """
+        rows = []
+        # 先精确匹配 context
+        for sql, params in (
+            ("SELECT word_b, weight, count FROM word_cooccur "
+             "WHERE word_a=? AND category=? AND context=? "
+             "ORDER BY weight DESC LIMIT ?",
+             (word, category, context, top_k)),
+            ("SELECT word_a, weight, count FROM word_cooccur "
+             "WHERE word_b=? AND category=? AND context=? "
+             "ORDER BY weight DESC LIMIT ?",
+             (word, category, context, top_k)),
+        ):
+            for row in self.conn.execute(sql, params):
+                rows.append((row[0], row[1], row[2]))
+        # 如果没有 context 匹配，回退到同一 category 的全部
+        if not rows and context:
+            for sql, params in (
+                ("SELECT word_b, weight, count FROM word_cooccur "
+                 "WHERE word_a=? AND category=? "
+                 "ORDER BY weight DESC LIMIT ?",
+                 (word, category, top_k)),
+                ("SELECT word_a, weight, count FROM word_cooccur "
+                 "WHERE word_b=? AND category=? "
+                 "ORDER BY weight DESC LIMIT ?",
+                 (word, category, top_k)),
+            ):
+                for row in self.conn.execute(sql, params):
+                    rows.append((row[0], row[1], row[2]))
+        rows.sort(key=lambda r: -r[1])
+        return rows[:top_k]
+
+    def learn_expression_pattern(self, action_type: str, confidence_bucket: str,
+                                  source: str, opener: str, body_template: str,
+                                  closer: str):
+        """v3.4: 记录一个语言表达模式"""
+        ts = time.time()
+        # 检查是否已存在类似模式
+        existing = self.conn.execute(
+            "SELECT id, count FROM lang_patterns "
+            "WHERE action_type=? AND confidence_bucket=? AND source=? "
+            "AND opener=? AND closer=?",
+            (action_type, confidence_bucket, source, opener, closer)
+        ).fetchone()
+        if existing:
+            self.conn.execute(
+                "UPDATE lang_patterns SET count=count+1, body_template=?, last_update=? "
+                "WHERE id=?",
+                (body_template, ts, existing[0]))
+        else:
+            self.conn.execute(
+                "INSERT INTO lang_patterns(action_type,confidence_bucket,source,"
+                "opener,body_template,closer,count,last_update) "
+                "VALUES(?,?,?,?,?,?,1,?)",
+                (action_type, confidence_bucket, source, opener, body_template,
+                 closer, ts))
+        self.conn.commit()
+
+    def query_expression_patterns(self, action_type: str,
+                                   confidence_bucket: str = "",
+                                   source: str = "",
+                                   min_count: int = 2,
+                                   top_k: int = 6) -> list[dict]:
+        """
+        v3.4: 查询某个场景下最常用的表达模式。
+
+        返回: [{opener, body_template, closer, count}, ...]
+        按 count 降序排列。
+        """
+        rows = []
+        # 层级回退: 精确匹配 → 放宽 source → 放宽 confidence_bucket
+        query_layers = []
+        if confidence_bucket and source:
+            query_layers.append(
+                ("WHERE action_type=? AND confidence_bucket=? AND source=? "
+                 "AND count>=? ORDER BY count DESC LIMIT ?",
+                 (action_type, confidence_bucket, source, min_count, top_k)))
+        if confidence_bucket:
+            query_layers.append(
+                ("WHERE action_type=? AND confidence_bucket=? AND count>=? "
+                 "ORDER BY count DESC LIMIT ?",
+                 (action_type, confidence_bucket, min_count, top_k)))
+        query_layers.append(
+            ("WHERE action_type=? AND count>=? ORDER BY count DESC LIMIT ?",
+             (action_type, min_count, top_k)))
+
+        for sql, params in query_layers:
+            for row in self.conn.execute(
+                f"SELECT opener, body_template, closer, count FROM lang_patterns {sql}",
+                params):
+                rows.append({
+                    "opener": row[0], "body_template": row[1],
+                    "closer": row[2], "count": row[3],
+                })
+            if rows:
+                break  # 有结果就不再放宽
+        return rows[:top_k]
+
+    def get_corpus_stats(self) -> dict:
+        """v3.4: 语料库统计——监控语料库是否达到质变临界点"""
+        wc_total = self.conn.execute(
+            "SELECT COUNT(*) FROM word_cooccur").fetchone()[0]
+        lp_total = self.conn.execute(
+            "SELECT COUNT(*) FROM lang_patterns").fetchone()[0]
+        lt_total = self.conn.execute(
+            "SELECT COUNT(*) FROM language_traces").fetchone()[0]
+
+        # 每个 (action, confidence) 组合有多少种不同表达?
+        diversity = {}
+        for row in self.conn.execute(
+            "SELECT action_type, confidence_bucket, COUNT(DISTINCT opener) as openers, "
+            "COUNT(*) as total FROM lang_patterns GROUP BY action_type, confidence_bucket"):
+            diversity[f"{row[0]}-{row[1]}"] = {
+                "unique_openers": row[2], "total_patterns": row[3],
+                "rich": row[2] >= 3,  # ≥3 种不同开头的算"丰富"
+            }
+
+        # 质变临界点: 平均每种场景 5+ 种变体
+        avg_variants = sum(d["unique_openers"] for d in diversity.values()) / max(len(diversity), 1)
+        reached_critical_mass = avg_variants >= 3 and wc_total >= 100
+
+        return {
+            "word_cooccur_total": wc_total,
+            "lang_patterns_total": lp_total,
+            "language_traces_total": lt_total,
+            "pattern_diversity": diversity,
+            "avg_variants_per_scene": round(avg_variants, 1),
+            "critical_mass_reached": reached_critical_mass,
+        }
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM cognitive_traces").fetchone()[0]
