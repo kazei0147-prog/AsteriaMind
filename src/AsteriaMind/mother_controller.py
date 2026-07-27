@@ -162,10 +162,15 @@ class MotherController:
                     if e.get('obj') != obj
                 ]
 
-            # ── 在线学习: 置信不足 → 触发 ActiveLearner 对外查询 ──
+            # ── 在线学习: 无直接匹配证据 → 触发 ActiveLearner 对外查询 ──
             er_conf = er.get("confidence", 0)
             er_ev = er.get("evidence", [])
-            if (er_conf < 0.3 or not er_ev) and self.active_learner:
+            # 检查是否有直接匹配 (subj 和 obj 都匹配)
+            has_direct = any(
+                e.get("subj") == subj and e.get("obj") == obj
+                for e in er_ev
+            ) if er_ev else False
+            if not has_direct and self.active_learner:
                 learn_result = self.active_learner.learn_relation(subj, pred, obj)
                 if learn_result.get("learned"):
                     # 搜到了 → 更新证据 + belief

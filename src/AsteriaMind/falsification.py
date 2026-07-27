@@ -258,26 +258,52 @@ class WebSearchInterface:
         )]
 
 
+_DDGS_INSTANCE = None
+
+
 def _default_web_search(query: str, max_results: int = 5) -> list[WebResult]:
     """
-    用 WorkBuddy 内置的 WebSearch 工具做真实搜索。
-    如果 WorkBuddy 不可用, 回退到占位。
+    用 DuckDuckGo 做真实搜索 (无需 API 密钥)。
+    动态 import: 包不可用时优雅降级到占位符。
+    DDGS 实例复用 + 失败重试, 避免密集调用时被限流。
     """
+    global _DDGS_INSTANCE
     try:
-        import subprocess, json
-        # 通过 sys.argv 传参的方式调用 WorkBuddy 的 WebSearch
-        # 实际中 WebSearch 会被框架直接调用, 这里做最小化适配
+        import warnings
+        warnings.filterwarnings('ignore')
+        if _DDGS_INSTANCE is None:
+            from duckduckgo_search import DDGS
+            _DDGS_INSTANCE = DDGS()
+
+        raw = []
+        for attempt in range(3):
+            raw = list(_DDGS_INSTANCE.text(query, max_results=max_results))
+            if raw:
+                break
+            import time
+            time.sleep(1.5)
+
+        results = []
+        for r in raw:
+            results.append(WebResult(
+                query=query,
+                url=r.get('href', r.get('url', '')),
+                title=r.get('title', ''),
+                snippet=r.get('body', r.get('snippet', '')),
+                source_credibility=0.4,
+            ))
+        return results
+    except ImportError:
         return [WebResult(
             query=query, url=f"(search://{query})",
-            title=f"[需WebSearch框架支持] {query}",
-            snippet=f"AM 的 WebSearch 适配器已就绪, 但在当前环境中需要框架层调用。"
-                   f"在 WorkBuddy 对话中可通过 Agent 直接调用 WebSearch。",
-            source_credibility=0.5,
+            title=f"[需安装 duckduckgo-search] {query}",
+            snippet="pip install duckduckgo-search 后可启用真实搜索。",
+            source_credibility=0.0,
         )]
-    except Exception:
+    except Exception as e:
         return [WebResult(
             query=query, url=f"(search://{query})",
-            title=f"搜索结果: {query}",
-            snippet=f"搜索不可用。为 AM 配置 WebSearch 请设置 WebSearchInterface(search_fn=your_func)。",
+            title=f"[搜索出错] {query}",
+            snippet=f"搜索异常: {e}",
             source_credibility=0.0,
         )]
