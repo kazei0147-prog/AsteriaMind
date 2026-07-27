@@ -591,28 +591,47 @@ class CognitiveInterface:
     输入 → Semantic → Pragmatic → Action → Cognitive Core
     """
 
-    def __init__(self, kg=None, db=None):
+    def __init__(self, kg=None, db=None, web_search=None):
         self.kg = kg
         self.db = db
         self.semantic = SemanticHypothesisEngine(kg, db)
         self.pragmatic = PragmaticIntentEngine(kg)
         self.action = ActionIntentEngine()
-        # EmergentVectorStore: 反馈驱动的认知痕迹 (替代硬标签符号)
+        # StarMap: 认知空间 (替代硬标签符号)
         from AsteriaMind.cognitive_star_map import CognitiveStarMap
         self.cognitive_star_map = CognitiveStarMap()
 
-        # Mother v3: 认知调度主循环
+        # ActiveLearner: 在线学习 — 知识空白时对外查询
+        from AsteriaMind.active_learner import ActiveLearner
+        self.active_learner = ActiveLearner(
+            kg, None, web_search, None, self.cognitive_star_map)
+
+        # Mother v3: 认知调度主循环 (传入 active_learner)
         from AsteriaMind.mother_controller import MotherController
-        self.mother = MotherController(self.cognitive_star_map, kg, db)
+        self.mother = MotherController(
+            self.cognitive_star_map, kg, db, self.active_learner)
+
+        # DreamModule: 离线假说生成
+        from AsteriaMind.dream_module import DreamModule
+        self.dream_module = DreamModule(self.cognitive_star_map)
+
+        # OfflineLearner: 离线学习循环 (AM 闲时自主学习)
+        from AsteriaMind.offline_learner import OfflineLearner
+        self.offline_learner = OfflineLearner(
+            star_map=self.cognitive_star_map,
+            active_inference=self.mother.active_inference,
+            dream_module=self.dream_module,
+            active_learner=self.active_learner,
+        )
+
+        # 注册: 已学到的语言原语 (修复: 原来在 consolidate() 的 return 之后, 从未执行)
+        self._load_kg_primitives()
 
     def consolidate(self) -> dict:
         """触发记忆巩固——后台低频调用"""
         from AsteriaMind.memory_consolidation import MemoryConsolidation
         mc = MemoryConsolidation(self.cognitive_star_map)
         return mc.consolidate()
-
-        # 注册: 已学到的语言原语
-        self._load_kg_primitives()
 
     def _load_kg_primitives(self):
         """从 KG 加载已知的语言原语词性"""

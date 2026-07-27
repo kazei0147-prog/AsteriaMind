@@ -34,8 +34,19 @@ def _structure_to_language(cog: dict) -> str:
         return " ".join(parts)
 
     if action == "info_request":
+        source = cog.get("source", "")
         if not evidence:
             return f"关于「{subj}」我还不了解。你能教我吗?"
+        if source == "online_learning":
+            parts = [f"我刚查了一下——"]
+            ev_short = evidence[:2]
+            parts.append(f"「{ev_short[0]}」")
+            if len(ev_short) > 1:
+                parts.append(f"，还有「{ev_short[1]}」")
+            parts.append(f"。(置信 {conf:.0%})")
+            return " ".join(parts)
+        if source == "knowledge_gap":
+            return f"关于「{subj}」和「{obj}」的关系，我查了但没找到可靠信息。你能教我吗?"
         if conf > 0.5:
             head = "对" if conf > 0.7 else "应该对"
             parts = [f"{head}——"]
@@ -68,10 +79,11 @@ class MotherController:
     主循环——不控制模块内部, 只决定每轮执行顺序。
     """
 
-    def __init__(self, star_map=None, kg=None, db=None):
+    def __init__(self, star_map=None, kg=None, db=None, active_learner=None):
         self.star_map = star_map
         self.kg = kg
         self.db = db
+        self.active_learner = active_learner  # 在线学习: 知识空白时对外查询
         self.active_inference = ActiveInferenceEngine(star_map)
         self.meta_cognition = MetaCognition()
         self.meta_reasoning = MetaReasoningLayer()
@@ -149,6 +161,35 @@ class MotherController:
                     e['obj'] for e in er.get("evidence", [])[:3]
                     if e.get('obj') != obj
                 ]
+
+            # ── 在线学习: 置信不足 → 触发 ActiveLearner 对外查询 ──
+            er_conf = er.get("confidence", 0)
+            er_ev = er.get("evidence", [])
+            if (er_conf < 0.3 or not er_ev) and self.active_learner:
+                learn_result = self.active_learner.learn_relation(subj, pred, obj)
+                if learn_result.get("learned"):
+                    # 搜到了 → 更新证据 + belief
+                    cognitive_output["evidence"] = [
+                        f"{f['subj']} {f['pred']} {f['obj']} (网络学习)"
+                        for f in learn_result.get("facts", [])[:3]
+                    ]
+                    cognitive_output["confidence"] = 0.6
+                    cognitive_output["source"] = "online_learning"
+                    # 重新查星图获取更新后的预测
+                    er2 = self.star_map.emergent_reply(text, subj, pred, obj)
+                    if er2.get("evidence"):
+                        cognitive_output["evidence"].extend(
+                            f"{e['subj']} {e.get('pred',pred)} {e['obj']}"
+                            for e in er2["evidence"][:2]
+                        )
+                    # 贝叶斯更新
+                    self.active_inference.update_from_feedback(subj, pred, obj, True)
+                elif learn_result.get("known"):
+                    # 星图已有足够证据 — 不需要对外查询
+                    pass
+                else:
+                    # 搜不到 → 标记知识缺口
+                    cognitive_output["source"] = "knowledge_gap"
 
         elif action == "self_directed":
             cognitive_output["evidence"] = [f"星图痕迹: {self.star_map.count() if self.star_map else 0}"]

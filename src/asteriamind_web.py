@@ -52,7 +52,7 @@ for t in _builtin_templates(): reg.register(t)
 skill_lib = build_default_skills()
 mr = MathReasoner()
 web_search = WebSearchInterface()
-ci = CognitiveInterface(kg, db)
+ci = CognitiveInterface(kg, db, web_search)
 
 # 从 DB 恢复已有知识
 for r in db.query():
@@ -787,6 +787,23 @@ if __name__ == "__main__":
                 print(f"\n  ⚠️ Consolidation error: {e}")
 
     threading.Thread(target=_consolidation_loop, daemon=True).start()
+
+    # 后台离线学习线程: 每 300 秒跑一次 (AM 闲时自主学习)
+    def _offline_learn_loop():
+        while True:
+            time.sleep(300)
+            try:
+                result = ci.offline_learner.run_cycle()
+                if result.get("proposals", 0) > 0:
+                    print(f"\n  🔍 Offline Learning: "
+                          f"proposals={result['proposals']} "
+                          f"winners={result['winners']} "
+                          f"learned={result['learned']} "
+                          f"skipped={result['skipped']}")
+            except Exception as e:
+                print(f"\n  ⚠️ Offline learning error: {e}")
+
+    threading.Thread(target=_offline_learn_loop, daemon=True).start()
 
     port = 8866
     print(f"\n╔══════════════════════════════╗")

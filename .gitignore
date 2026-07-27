@@ -24,6 +24,11 @@ env/
 .DS_Store
 Thumbs.db
 
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
 # Experiment temp files (keep summary.json and PNGs)
 round_logs.json
 checkpoints.json
