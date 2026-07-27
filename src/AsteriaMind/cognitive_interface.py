@@ -624,8 +624,66 @@ class CognitiveInterface:
             active_learner=self.active_learner,
         )
 
+        # ── v3.3: 反映射闭环 ──
+        from AsteriaMind.reflection import SessionReflector
+        self._reflectors: dict[str, SessionReflector] = {}  # session_id → reflector
+        self._active_session_id: str = ""
+        self.mother.reflector = None  # 由 start_session 注入
+
         # 注册: 已学到的语言原语 (修复: 原来在 consolidate() 的 return 之后, 从未执行)
         self._load_kg_primitives()
+
+    def start_reflection_session(self, session_id: str = "") -> "SessionReflector":
+        """
+        v3.3: 开始一个反映射会话。
+
+        每次新的对话会话开始时调用。
+        返回的 SessionReflector 跟踪此会话中所有问答的反馈。
+        """
+        from AsteriaMind.reflection import SessionReflector
+        sid = session_id or f"sess_{id(self)}_{int(__import__('time').time())}"
+        reflector = SessionReflector(sid)
+        self._reflectors[sid] = reflector
+        self._active_session_id = sid
+        self.mother.reflector = reflector
+        return reflector
+
+    def end_reflection_session(self, session_id: str = "") -> dict:
+        """
+        v3.3: 结束反映射会话——生成自我评估。
+
+        返回结构化评估 {accuracy, module_accuracy, suggestions, summary, ...}
+        """
+        sid = session_id or self._active_session_id
+        reflector = self._reflectors.get(sid)
+        if not reflector:
+            return {"status": "no_session", "summary": "无活跃会话"}
+        reflector.close_session()
+        assessment = reflector.generate_self_assessment()
+        # 教训→MetaCognition (跨会话)
+        lessons = reflector.get_lessons_for_next_session()
+        for mod_name, acc in lessons.get("module_weights", {}).items():
+            self.mother.meta_cognition.learn_from_reflection(
+                mod_name, acc > 0.5
+            )
+        return assessment
+
+    def get_session_reflection(self, session_id: str = "") -> dict:
+        """v3.3: 获取当前会话的自我评估(不结束会话)"""
+        sid = session_id or self._active_session_id
+        reflector = self._reflectors.get(sid)
+        if not reflector:
+            return {"status": "no_session", "summary": "无活跃会话"}
+        return reflector.generate_self_assessment()
+
+    def capture_feedback(self, next_user_text: str,
+                         session_id: str = "") -> dict:
+        """v3.3: 从用户输入中捕获对上一轮回答的反馈信号"""
+        sid = session_id or self._active_session_id
+        reflector = self._reflectors.get(sid)
+        if not reflector:
+            return {"signal": "no_session", "detail": "无活跃会话"}
+        return reflector.capture_feedback(next_user_text)
 
     def plan_next_action(self, subj: str = "", pred: str = "", obj: str = "",
                          top_k: int = 3) -> list[dict]:

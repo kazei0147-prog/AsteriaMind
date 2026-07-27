@@ -142,7 +142,11 @@ async function send() {
 
 
 class AMHandler(http.server.BaseHTTPRequestHandler):
-    """AM 的 HTTP 请求处理器"""
+    """AM 的 HTTP 请求处理器 (v3.3: 反映射闭环)"""
+
+    # ── v3.3: 会话跟踪 ──
+    SESSIONS: dict[str, dict] = {}  # ip → {session_id, reflection_ctx, last_active}
+    SESSION_TIMEOUT = 300  # 5 分钟超时
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -162,6 +166,10 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._serve_dashboard()
         elif self.path == "/api/stats":
             self._json({"stats": db.stats(), "relations": db.count()})
+        elif self.path == "/api/reflect":
+            self._handle_reflect()
+        elif self.path == "/api/health":
+            self._handle_health()
         else:
             self.send_error(404)
 
@@ -223,21 +231,72 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"reply": "请说点什么", "error": True})
                 return
 
-            # ── 持久对话上下文 ──
+            # ── v3.3: 会话管理 + 反馈捕获 ──
             sid = self.client_address[0]
+            now = time.time()
+            session = self.SESSIONS.get(sid)
+
+            # 检查超时 → 结束旧会话, 生成评估
+            if session and (now - session.get("last_active", 0) > self.SESSION_TIMEOUT):
+                old_sid = session.get("session_id", "")
+                if old_sid:
+                    assessment = ci.end_reflection_session(old_sid)
+                    print(f"\n  📋 Session {old_sid} ended (timeout): "
+                          f"accuracy={assessment.get('accuracy',0):.0%} "
+                          f"exchanges={assessment.get('total_exchanges',0)}")
+                session = None
+
+            # 新会话
+            if not session:
+                reflector = ci.start_reflection_session()
+                session = {
+                    "session_id": reflector.session_id,
+                    "reflection_ctx": {},
+                    "last_active": now,
+                    "exchange_count": 0,
+                }
+                self.SESSIONS[sid] = session
+
+            # ── 反馈闭环: 用户本轮输入 → 对上轮回答的反馈 ──
+            prev_ctx = session.get("reflection_ctx", {})
+            if prev_ctx and session.get("exchange_count", 0) > 0:
+                fb_result = ci.capture_feedback(text, session["session_id"])
+                prev_ctx["pending_feedback"] = fb_result
+
+            # ── 持久对话上下文 ──
             topic = self._extract_topic(text)
             CONV_MEMORY.add(sid, "user", text, topic)
             context_str = CONV_MEMORY.get_context_string(sid, text)
 
-            reply, action, cognitive = self._process(text, context=context_str)
+            reply, action, cognitive = self._process(
+                text, context=context_str, reflection_ctx=prev_ctx)
+
+            # ── 更新会��状态 ──
+            session["reflection_ctx"] = cognitive.get("reflection_ctx", {})
+            session["last_active"] = now
+            session["exchange_count"] += 1
 
             CONV_MEMORY.add(sid, "am", reply, topic)
 
-            self._json({
+            # ── 构建响应 (含反映射信息) ──
+            resp_data = {
                 "reply": reply, "action": action,
                 "cognitive": cognitive,
                 "stats": f"数据库: {db.count()} 条关系 | 模板: {len(reg.templates)} 个",
-            })
+            }
+
+            # 如果刚结束了旧会话, 附带评估摘要
+            if cognitive.get("was_correct_last") is not None:
+                resp_data["last_feedback"] = {
+                    "was_correct": cognitive["was_correct_last"],
+                    "signal": cognitive.get("prev_feedback", {}).get("signal", ""),
+                }
+
+            # 附带上轮反馈信息
+            if cognitive.get("prev_feedback"):
+                resp_data["prev_feedback"] = cognitive["prev_feedback"]
+
+            self._json(resp_data)
         except Exception as e:
             self._json({"reply": f"内部错误: {e}", "error": True})
 
@@ -255,6 +314,25 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._json({"reply": f"学会了: {subj} --[{pred}]--> {obj}"})
         except Exception as e:
             self._json({"reply": f"错误: {e}", "error": True})
+
+    def _handle_reflect(self):
+        """v3.3: 获取当前会话的自我评估"""
+        sid = self.client_address[0]
+        session = self.SESSIONS.get(sid)
+        if not session:
+            self._json({"status": "no_session", "summary": "无活跃会话"})
+            return
+        assessment = ci.get_session_reflection(session.get("session_id", ""))
+        # 附加权重信息
+        assessment["module_weights"] = ci.mother.meta_cognition.get_all_weights()
+        self._json(assessment)
+
+    def _handle_health(self):
+        """v3.3: 系统健康报告"""
+        health = ci.mother.get_health()
+        health["meta_cognition_weights"] = ci.mother.meta_cognition.get_all_weights()
+        health["star_map_traces"] = ci.cognitive_star_map.count()
+        self._json(health)
 
     def _extract_topic(self, text: str) -> str:
         """从一句话提取核心话题词"""
@@ -276,10 +354,13 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 return w
         return ""
 
-    def _process(self, text: str, context: str = None) -> tuple[str, str]:
+    def _process(self, text: str, context: str = None,
+                 reflection_ctx: dict = None) -> tuple[str, str, dict]:
         """
         ── Cognitive Interface Layer ──
-        Semantic → Pragmatic → Action → 回复
+        Semantic → Pragmatic → Action → Mother v3 → 回复
+
+        v3.3: 传入 reflection_ctx 支持反馈闭环
         """
         # 命令: learnw/readcn/answer/偏好教学 (保留)
         if text.startswith(('learnw ', 'readcn ', 'answer ', '以后我')):
@@ -291,15 +372,21 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             if m:
                 r = m.execute(text, kg)
                 if r.get("success"):
-                    return (f"🧮 {r.get('result')}", "math")
+                    return (f"🧮 {r.get('result')}", "math", {})
 
-        # Mother v3 主循环: Semantic → Pragmatic → AI → MetaCognition
+        # Mother v3 主循环: 含反馈闭环
         result = ci.process(text)
-        loop = ci.mother.loop(result.get("semantic"), result.get("pragmatic"), text)
+        loop = ci.mother.loop(
+            result.get("semantic"), result.get("pragmatic"),
+            text, reflection_ctx or {})
         reply = loop.get("reply", "?")
         action = loop.get("action", "unknown")
-        return (reply, action, loop.get("cognitive", {}))
-        return (reply, result.get("action", "unknown"))
+        cognitive = loop.get("cognitive", {})
+        # 携带反馈上下文
+        cognitive["reflection_ctx"] = loop.get("reflection_ctx", {})
+        cognitive["prev_feedback"] = loop.get("prev_feedback")
+        cognitive["was_correct_last"] = loop.get("was_correct_last")
+        return (reply, action, cognitive)
 
     def _process_legacy(self, text: str) -> tuple[str, str]:
         """命令路由: learnw / readcn / answer / 偏好教学"""

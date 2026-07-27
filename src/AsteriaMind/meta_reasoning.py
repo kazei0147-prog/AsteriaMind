@@ -58,6 +58,18 @@ class MetaReasoningLayer:
         self.health.total_predictions += 1
         self.health.total_errors += error
 
+    def record_outcome(self, strategy: str, was_correct: bool,
+                       predicted_confidence: float = 0.5):
+        """
+        v3.3: 用真实反馈替代硬编码 actual=0.5。
+
+        was_correct: True = 用户确认/追问(正反馈)
+                     False = 用户纠正/转移(负反馈)
+        predicted_confidence: 系统本轮给出的置信度
+        """
+        actual = 1.0 if was_correct else 0.0
+        self.record_prediction(strategy, predicted_confidence, actual)
+
     def get_system_health(self) -> dict:
         """系统健康报告"""
         if not self.error_history:

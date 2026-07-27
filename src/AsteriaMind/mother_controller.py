@@ -1,10 +1,14 @@
 """
-MotherController — 认知调度主循环 (AsteriaMind v3)
+MotherController — 认知调度主循环 (AsteriaMind v3.3)
 
 不是旧的全权 MotherFallback。
 
 只是每轮跑一次的轻量管道:
   Semantic → Pragmatic → ActiveInference → MetaCognition → 行动选择
+
+v3.3: 反映射闭环 — loop() 接受上轮反馈, 在下一轮开始前喂给
+       MetaReasoning (真实预测误差) + MetaCognition (模块权重调整),
+       形成"回答→反馈→学习→下次更好"的闭环。
 """
 from AsteriaMind.active_inference import ActiveInferenceEngine
 from AsteriaMind.meta_cognition import MetaCognition
@@ -103,25 +107,45 @@ class MotherController:
     主循环——不控制模块内部, 只决定每轮执行顺序。
     """
 
-    def __init__(self, star_map=None, kg=None, db=None, active_learner=None):
+    def __init__(self, star_map=None, kg=None, db=None, active_learner=None,
+                 reflector=None):
         self.star_map = star_map
         self.kg = kg
         self.db = db
         self.active_learner = active_learner  # 在线学习: 知识空白时对外查询
+        self.reflector = reflector  # v3.3: SessionReflector 反馈采集
         self.active_inference = ActiveInferenceEngine(star_map)
         self.meta_cognition = MetaCognition()
         self.meta_reasoning = MetaReasoningLayer()
         self.round_count = 0
 
     def loop(self, semantic_result: dict, pragmatic_result: dict,
-             text: str) -> dict:
+             text: str, reflection_ctx: dict = None) -> dict:
         """
-        一轮认知调度。
+        一轮认知调度 (v3.3: 含反馈闭环)。
 
         输入: Semantic + Pragmatic 的结构化结果
-        输出: { reply, action, confidence, ... }
+              + 可选的 reflection_ctx (含上轮反馈信号)
+        输出: { reply, action, confidence, reflection_ctx, ... }
         """
         self.round_count += 1
+
+        # ── 0. 反馈闭环: 处理上轮反馈 ★ v3.3 ★ ──
+        prev_feedback = None
+        if reflection_ctx and reflection_ctx.get("pending_feedback"):
+            prev_feedback = reflection_ctx["pending_feedback"]
+            was_correct = prev_feedback.get("was_correct", False)
+            prev_conf = reflection_ctx.get("last_confidence", 0.5)
+            prev_modules = reflection_ctx.get("last_modules", {})
+
+            # → MetaReasoning: 真实预测误差
+            self.meta_reasoning.record_outcome("direct", was_correct, prev_conf)
+
+            # → MetaCognition: 调整各模块投票权重
+            for mod_name in prev_modules:
+                self.meta_cognition.learn_from_reflection(mod_name, was_correct)
+        else:
+            was_correct = None
         sem = semantic_result
         prag = pragmatic_result
         struct = sem.get("structure", {}) if isinstance(sem, dict) else getattr(sem, "structure", {})
@@ -232,17 +256,41 @@ class MotherController:
         # ── 4. 语言生成: 从结构到文本 ──
         reply = _structure_to_language(cognitive_output)
 
-        # ── 5. MetaReasoning: 记录预测误差 ──
-        if belief and belief.get("belief") is not None:
-            predicted = belief["belief"]
-            # 实际反馈: 如果用户继续这条对话且没有纠正 → 视为 confirmed
-            # 这里用 0.5 作为默认先验
-            self.meta_reasoning.record_prediction(
-                strategy="direct",
-                predicted=predicted,
-                actual=0.5,  # 未知, 等待下一轮确认
-                importance=1.0,
+        # ── 5. 记录本轮交换 + 构建下轮反馈上下文 ★ v3.3 ★ ──
+        new_reflection_ctx = {}
+        if self.reflector:
+            # 记录本轮问答 (反馈由下一轮用户输入确定)
+            self.reflector.record_exchange(
+                question=text,
+                answer=reply,
+                confidence=confidence,
+                action=action,
+                modules={
+                    "semantic": 1.0,
+                    "pragmatic": 1.0,
+                    "meta_cognition": 1.0,
+                },
+                planned_actions=cognitive_output.get("planned_actions", []),
             )
+            # 返回上下文供下轮反馈处理
+            new_reflection_ctx = {
+                "session_id": self.reflector.session_id,
+                "last_round": self.round_count,
+                "last_confidence": confidence,
+                "last_modules": {
+                    "semantic": 1.0,
+                    "pragmatic": 1.0,
+                    "meta_cognition": 1.0,
+                },
+            }
+
+        # ── 6. MetaReasoning: 定期反思 (每20轮或首次) ──
+        if self.round_count % 20 == 1 or self.round_count == 1:
+            reflections = self.meta_reasoning.reflect()
+            if reflections:
+                cognitive_output["meta_reflections"] = [
+                    r["observation"] for r in reflections[:3]
+                ]
 
         return {
             "reply": reply,
@@ -251,6 +299,9 @@ class MotherController:
             "belief": belief,
             "arbitration": arbitration,
             "cognitive": cognitive_output,
+            "reflection_ctx": new_reflection_ctx,     # ★ v3.3
+            "prev_feedback": prev_feedback,            # ★ v3.3: 上轮反馈结果
+            "was_correct_last": was_correct,           # ★ v3.3: 上轮是否正确
         }
 
     def get_health(self) -> dict:
