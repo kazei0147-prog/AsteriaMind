@@ -627,6 +627,81 @@ class CognitiveInterface:
         # 注册: 已学到的语言原语 (修复: 原来在 consolidate() 的 return 之后, 从未执行)
         self._load_kg_primitives()
 
+    def plan_next_action(self, subj: str = "", pred: str = "", obj: str = "",
+                         top_k: int = 3) -> list[dict]:
+        """
+        Active Inference 在线规划 —— "基于当前上下文，下一步该做什么？"
+
+        这是用户蓝图中的核心接入点:
+          检索当前上下文相关边 → choose_action() 评分
+          → 映射为可执行行动 (verify/explore/suggest/clarify)
+
+        输入: 当前语义结构 (subj, pred, obj)
+        输出: 按 BudgetContest 得分排序的行动建议列表
+          [{action_type, suggestion, subj, pred, obj, score, ...}, ...]
+        """
+        if not subj or not self.cognitive_star_map:
+            return []
+
+        star = self.cognitive_star_map
+        candidates = []
+        seen = set()
+
+        # ── 1. 当前查询的精确边 (如果存在) ──
+        if pred and obj:
+            key = (subj, pred, obj)
+            if key not in seen:
+                candidates.append(key)
+                seen.add(key)
+
+        # ── 2. 同主语的其他边 —— "关于这个实体我还知道什么?" ──
+        try:
+            for row in star.conn.execute(
+                "SELECT subj, pred, obj FROM cognitive_traces WHERE subj=? LIMIT 20",
+                (subj,)
+            ):
+                key = (row[0], row[1], row[2])
+                if key not in seen:
+                    candidates.append(key)
+                    seen.add(key)
+        except Exception:
+            pass
+
+        # ── 3. 同宾语的反向查询 —— "还有什么东西也是 X?" ──
+        if obj:
+            try:
+                for row in star.conn.execute(
+                    "SELECT subj, pred, obj FROM cognitive_traces WHERE obj=? LIMIT 12",
+                    (obj,)
+                ):
+                    key = (row[0], row[1], row[2])
+                    if key not in seen:
+                        candidates.append(key)
+                        seen.add(key)
+            except Exception:
+                pass
+
+        # ── 4. 共现高频边 —— "经常一起出现的概念" ──
+        if pred:
+            try:
+                for row in star.conn.execute(
+                    "SELECT subj, pred, obj FROM cognitive_traces "
+                    "WHERE pred=? AND subj!=? LIMIT 8",
+                    (pred, subj)
+                ):
+                    key = (row[0], row[1], row[2])
+                    if key not in seen:
+                        candidates.append(key)
+                        seen.add(key)
+            except Exception:
+                pass
+
+        if not candidates:
+            # 回退: 全局最不确定的边
+            return self.mother.active_inference.plan_actions(top_k=top_k)
+
+        return self.mother.active_inference.plan_actions(candidates, top_k=top_k)
+
     def consolidate(self) -> dict:
         """触发记忆巩固——后台低频调用"""
         from AsteriaMind.memory_consolidation import MemoryConsolidation

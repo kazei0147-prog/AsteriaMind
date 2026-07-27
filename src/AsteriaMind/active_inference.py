@@ -227,3 +227,75 @@ class ActiveInferenceEngine:
                 })
         edges.sort(key=lambda e: -e["uncertainty"])
         return edges[:top_k]
+
+    def plan_actions(self, candidate_edges: list[tuple] = None,
+                     top_k: int = 3) -> list[dict]:
+        """
+        Active Inference 行动规划 —— 不是"哪个得分高"，
+        而是"下一步该做什么"。
+
+        用 choose_action() 的 BudgetContest 评分，映射为可执行的行动类型:
+
+          Action Type    Condition                          Example
+          ─────────────────────────────────────────────────────────
+          "verify"       高不确定性 + 有证据但矛盾             向用户确认
+          "explore"      高信息增益 + 低证据                   搜索网络
+          "suggest"      中高置信度 + 有证据                   主动告知相关知识
+          "clarify"      极高不确定性 + 有证据                 请求用户澄清
+          "observe"      低证据 + 低信息增益                   静默观察
+
+        返回 list[dict]:
+          { action_type, suggestion, subj, pred, obj,
+            score, info_gain, uncertainty, belief, evidence_count }
+        """
+        scored = self.choose_action(candidate_edges, top_k=max(top_k * 2, 5))
+        if not scored:
+            return []
+
+        plans = []
+        for subj, pred, obj, info_gain, score in scored:
+            edge = self.get_or_create_belief(subj, pred, obj)
+            uncertainty = edge.uncertainty
+            mean = edge.mean
+            evidence = edge.total_evidence
+
+            # ── 行动分类 ──
+            if uncertainty > 0.75 and evidence >= 2:
+                # 有证据但极不确定 → 证据可能矛盾, 需要澄清
+                action_type = "clarify"
+                suggestion = f"核实「{subj} {pred} {obj}」——证据不一致"
+            elif uncertainty > 0.55 and evidence >= 1:
+                # 有证据但仍不确定 → 主动验证
+                action_type = "verify"
+                suggestion = f"确认「{subj}」是否「{pred} {obj}」"
+            elif evidence == 0 and info_gain > 0.15:
+                # 完全未知 + 信息增益高 → 探索
+                action_type = "explore"
+                suggestion = f"探索「{subj}」的「{pred}」关系"
+            elif mean > 0.6 and evidence >= 2:
+                # 高置信 + 有证据 → 可主动分享
+                action_type = "suggest"
+                suggestion = f"可告知: {subj} {pred} {obj}"
+            elif evidence == 0 and info_gain <= 0.15:
+                # 未知且收益低 → 静默观察
+                action_type = "observe"
+                suggestion = f"静默观察「{subj} {pred} {obj}」"
+            else:
+                # 默认: 中等不确定性 → 验证
+                action_type = "verify"
+                suggestion = f"验证「{subj} {pred} {obj}」"
+
+            plans.append({
+                "subj": subj, "pred": pred, "obj": obj,
+                "action_type": action_type,
+                "suggestion": suggestion,
+                "score": round(score, 4),
+                "info_gain": round(info_gain, 4),
+                "uncertainty": round(uncertainty, 4),
+                "belief": round(mean, 4),
+                "evidence_count": evidence,
+            })
+
+        # 按得分降序
+        plans.sort(key=lambda p: -p["score"])
+        return plans[:top_k]
