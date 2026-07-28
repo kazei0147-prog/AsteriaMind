@@ -133,9 +133,12 @@ class LanguageGenerator:
         # 找与当前场景句型相同的句子
         placeholders = ",".join("?" * len(patterns))
         rows = self.star_map.conn.execute(
-            f"SELECT sentence, subj, pred, obj, pattern_type FROM language_traces "
+            f"SELECT sentence, subj, pred, obj, pattern_type, sentence_type "
+            f"FROM language_traces "
             f"WHERE pattern_type IN ({placeholders}) "
-            f"ORDER BY timestamp DESC LIMIT 30",
+            f"ORDER BY CASE WHEN sentence_type='conversational' THEN 0 "
+            f"WHEN sentence_type='encyclopedic' THEN 1 ELSE 2 END, "
+            f"timestamp DESC LIMIT 30",
             patterns
         ).fetchall()
 
@@ -159,6 +162,7 @@ class LanguageGenerator:
                 "sentence": sentence,
                 "subj": row[1], "pred": row[2], "obj": row[3],
                 "pattern_type": row[4],
+                "sentence_type": row[5] if len(row) > 5 else "unknown",
             })
 
         return {
@@ -173,32 +177,12 @@ class LanguageGenerator:
         """
         从原始语料的真实句子中生成回复。
 
-        不是直接用原句子——是提取语气骨架 + 替换实体。
+        v3.5: 不只学开头标记，学整句的信息组织方式。
+              提取句式骨架 → 填充当前实体 → 生成自然句子。
         """
         import random
 
-        openers = lt.get("top_openers", [])
-        closers = lt.get("top_closers", [])
-
-        if not openers:
-            return self._fallback_template(
-                "info_request", subj, pred, obj, conf, evidence, diffs, "")
-
-        # 加权随机选 opener 和 closer
-        total_w = sum(c for _, c in openers) or 1
-        r = random.random() * total_w
-        cumulative = 0
-        chosen_opener = openers[0][0]
-        for op, count in openers:
-            cumulative += count
-            if r <= cumulative:
-                chosen_opener = op
-                break
-
-        # ── 提取语气标记: "对的，企鹅是鸟类" → "对的，" ──
-        opener_marker = self._extract_opener_marker(chosen_opener)
-
-        # ── 找最匹配的句子骨架 ──
+        # ── 1. 找最匹配的句子 ──
         best_sentence = None
         for s in lt.get("sentences", []):
             sentence = s.get("sentence", "")
@@ -215,20 +199,87 @@ class LanguageGenerator:
         if not best_sentence:
             best_sentence = lt["sentences"][0] if lt["sentences"] else None
 
-        # ── 构建 body: 语气标记 + 实体 ──
-        if evidence:
-            ev_text = "「" + evidence[0] + "」"
-            if len(evidence) > 1:
-                ev_text += " 和 「" + evidence[1] + "」"
-            body = ev_text
+        # ── 2. 提取句式骨架 ──
+        if best_sentence:
+            skeleton = self._extract_sentence_skeleton(
+                best_sentence["sentence"], best_sentence.get("subj",""),
+                best_sentence.get("obj",""), pred)
         else:
-            body = f"{subj} {pred} {obj}"
+            skeleton = None
 
-        # ── 构建 closer: 语料库的自然结尾 ──
-        chosen_closer = closers[0][0] if closers else ""
-        chosen_closer = chosen_closer.replace("{conf}", f"{conf:.0%}")
+        # ── 3. 填充当前实体 → 生成 ──
+        if skeleton and skeleton.get("usable"):
+            body = self._fill_skeleton(skeleton, subj, pred, obj, evidence, conf)
+            return body
+        else:
+            # 回退: 用 opener marker
+            openers = lt.get("top_openers", [])
+            if not openers:
+                return self._fallback_template(
+                    "info_request", subj, pred, obj, conf, evidence, diffs, "")
+            chosen_opener = openers[0][0]
+            marker = self._extract_opener_marker(chosen_opener)
+            if evidence:
+                body = "「" + evidence[0] + "」"
+            else:
+                body = f"{subj} {pred} {obj}"
+            return f"{marker}{body}"
 
-        return f"{opener_marker}{body}{chosen_closer}"
+    def _extract_sentence_skeleton(self, sentence: str, orig_subj: str,
+                                    orig_obj: str, pred: str) -> dict:
+        """
+        v3.5: 从一句话中提取句式骨架。
+
+        不是找开头几个字——是提取整句的信息组织方式:
+          {subj} 有 X 的美称，是一种 Y
+          {subj} 不是 {obj}，因为 {reason}
+          {subj} 满足 {obj} 的特征：{features}
+
+        返回 {usable, template, clause_count, length}
+        """
+        # 按标点拆从句
+        clauses = re.split(r'[，,；;]', sentence)
+        clauses = [c.strip() for c in clauses if c.strip()]
+
+        if not clauses:
+            return {"usable": False}
+
+        # 生成模板: 用占位符替换原实体
+        template_parts = []
+        for clause in clauses:
+            c = clause
+            if orig_subj and orig_subj in c:
+                c = c.replace(orig_subj, "{subj}")
+            if orig_obj and orig_obj in c:
+                c = c.replace(orig_obj, "{obj}")
+            template_parts.append(c)
+
+        template = "，".join(template_parts)
+
+        # 可用的骨架: 至少替换了一个实体 + 长度合理
+        usable = ("{subj}" in template or "{obj}" in template) and len(template) > 4
+
+        return {
+            "usable": usable,
+            "template": template,
+            "clause_count": len(clauses),
+            "length": len(sentence),
+            "original": sentence,
+        }
+
+    def _fill_skeleton(self, skeleton: dict, subj: str, pred: str, obj: str,
+                        evidence: list, conf: float) -> str:
+        """
+        用当前实体填充句式骨架。
+        """
+        template = skeleton["template"]
+        result = template.replace("{subj}", subj).replace("{obj}", obj)
+
+        # 如果有证据，附上
+        if evidence:
+            result += "「" + evidence[0] + "」"
+
+        return result
 
     def _extract_opener_marker(self, opener: str) -> str:
         """

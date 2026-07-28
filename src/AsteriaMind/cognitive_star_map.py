@@ -177,6 +177,12 @@ class CognitiveStarMap:
                 );
                 CREATE INDEX IF NOT EXISTS idx_lp_action ON lang_patterns(action_type, confidence_bucket);
             """)
+        # v3.5: 自动迁移 — sentence_type 列
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='language_traces'")
+        if c.fetchone():
+            cols = {r[1] for r in self.conn.execute("PRAGMA table_info(language_traces)")}
+            if "sentence_type" not in cols:
+                c.execute("ALTER TABLE language_traces ADD COLUMN sentence_type TEXT DEFAULT 'unknown'")
         self.conn.commit()
 
     @staticmethod
@@ -189,6 +195,34 @@ class CognitiveStarMap:
         if '是' in sentence: return 'X是Y'
         if '吗' in sentence: return '问句'
         return '陈述'
+
+    @staticmethod
+    def _tag_sentence_type(sentence: str) -> str:
+        """
+        v3.5: 推断句子来源类型。
+
+        conversational: 对话式 — 有语气词、反问、简短
+        encyclopedic:  百科式 — 长句、定义性、书面语
+        title:         标题式 — 极短、无谓语
+        """
+        s = sentence.strip()
+        # 标题: 无标点 + 极短 + 无谓词
+        if len(s) <= 8 and not any(k in s for k in ('是', '会', '能', '有', '属于')):
+            return "title"
+        # 对话: 语气词开头或结尾
+        dialog_markers = ('嗯', '对', '不', '那', '所以', '但是', '可是', '其实', '哈哈')
+        if any(s.startswith(m) for m in dialog_markers):
+            return "conversational"
+        if s.rstrip().endswith(('吗', '呢', '吧', '？', '?', '！', '!')):
+            return "conversational"
+        if len(s) <= 20 and ('你' in s or '我' in s):
+            return "conversational"
+        # 百科: 长句 + 定义性
+        if len(s) > 15 or any(k in s for k in ('特征', '定义', '属于', '具有', '分为')):
+            return "encyclopedic"
+        if len(s) > 25:
+            return "encyclopedic"
+        return "unknown"
 
     def _cooccur_neighbors(self, entities: list[str], top_k: int = 20) -> set[str]:
         """
@@ -249,10 +283,12 @@ class CognitiveStarMap:
         cog_id = cur.lastrowid
         if text:
             lt = self._language_pattern(text)
+            stype = self._tag_sentence_type(text)
             self.conn.execute(
-                "INSERT INTO language_traces(sentence,subj,pred,obj,cognitive_id,pattern_type,timestamp) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (text, subj, pred, obj, cog_id, lt, time.time()))
+                "INSERT INTO language_traces"
+                "(sentence,subj,pred,obj,cognitive_id,pattern_type,sentence_type,timestamp) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (text, subj, pred, obj, cog_id, lt, stype, time.time()))
         # 更新共现边权
         ts = time.time()
         _incr_cooccur(self.conn.cursor(), subj, pred, feedback, ts)

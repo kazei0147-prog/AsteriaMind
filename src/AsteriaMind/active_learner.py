@@ -300,12 +300,13 @@ class ActiveLearner:
                 if subj not in sent:
                     continue
                 pattern = self.star_map._language_pattern(sent)
+                stype = self.star_map._tag_sentence_type(sent)
                 try:
                     self.star_map.conn.execute(
                         "INSERT INTO language_traces"
-                        "(sentence,subj,pred,obj,cognitive_id,pattern_type,timestamp) "
-                        "VALUES(?,?,?,?,NULL,?,?)",
-                        (sent, subj, pred, obj, pattern, time.time()))
+                        "(sentence,subj,pred,obj,cognitive_id,pattern_type,sentence_type,timestamp) "
+                        "VALUES(?,?,?,?,NULL,?,?,?)",
+                        (sent, subj, pred, obj, pattern, stype, time.time()))
                     stored += 1
                 except Exception:
                     pass
