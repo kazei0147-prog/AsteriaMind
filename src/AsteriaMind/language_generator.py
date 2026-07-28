@@ -46,6 +46,19 @@ class LanguageGenerator:
 
         bucket = self._confidence_bucket(conf)
 
+        # ── v3.5: 能量驱动的认知焦点 → 优先使用激活上下文 ──
+        focus = cognitive_output.get("cognitive_focus", "regex")
+        activation = cognitive_output.get("activation")
+
+        if focus == "activation_driven" and activation:
+            top_nodes = [a["node"] for a in activation[:3]]
+            node_text = "、".join(top_nodes)
+            if evidence:
+                return (f"我的星图中关于「{subj}」激活了这些节点: {node_text}。"
+                        f"「{evidence[0]}」")
+            return (f"「{subj}」在我的认知网里连接着: {node_text}——"
+                    f"你想了解哪个方向？")
+
         # ── 门控: 基于信息熵的骨架绑定阈值 ──
         # 不是"hello 看起来像实体吗"——是"hello 在星图中有语义权重吗?"
         # 节点度为 0 + 无共现 → 信息量太低 → 不应与知识骨架绑定 → 走社交/观察路径

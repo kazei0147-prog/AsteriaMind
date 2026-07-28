@@ -213,6 +213,9 @@ class MotherController:
             "confidence": confidence,
             "action": action,
             "evidence": [],
+            # v3.5: 能量激活数据
+            "cognitive_focus": cognitive_focus,
+            "activation": activation,
             "differences": [],
         }
 
