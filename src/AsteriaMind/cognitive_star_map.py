@@ -347,14 +347,15 @@ class CognitiveStarMap:
         能量扩散激活 — AM 的眼睛。
 
         不做实体识别。不做正则。不做 SQL WHERE subj=?。
-        把文本的所有 n-gram 片段丢进共现网，看哪些节点被"点亮"。
+        不做 LIKE。
 
-        "你知道森蚺吗"
-          → "你知道" → 共现网中激活度 0, 能量衰减
-          → "森蚺"   → 关联 蛇、南美洲、无毒 → 能量爆发！
-          → "吗"     → 激活度 0
+        把文本的所有 n-gram 片段精确匹配到共现网:
+          Layer 0: 直接命中的节点 → 激活其邻居
+          Layer 1: 高能节点 → 向邻居扩散 (能量 × 0.5)
+          Layer 2: 高能节点 → 再扩散 (能量 × 0.25)
 
-        返回: [{node, energy, neighbors, degree}, ...] 按能量降序
+        只有网络本身存在的连接才能传导能量。
+        没有连接 = 零激活 = 语义上不存在。
         """
         from collections import defaultdict
 
@@ -362,40 +363,56 @@ class CognitiveStarMap:
         if not chunks:
             return []
 
-        # ── 累积激活: 每个片段在共现网中激发的能量 ──
         activation: dict[str, float] = defaultdict(float)
-        activated_neighbors: dict[str, set] = defaultdict(set)
+        activated_by: dict[str, set] = defaultdict(set)
 
+        # ── Layer 0: 精确共现匹配 ──
+        # 只有共现表中实际存在的实体才能激活
+        matched = set()
         for chunk in chunks:
-            # 精确匹配: 查共现表中 entity_a=? 或 entity_b=?
-            neighbors = self._cooccur_neighbors([chunk], top_k=20)
-            if not neighbors and len(chunk) >= 4:
-                # 模糊匹配: "道森蚺" 作为子串匹配 "森蚺"
-                try:
-                    for row in self.conn.execute(
-                        "SELECT entity_a, entity_b FROM co_occurrence "
-                        "WHERE entity_a LIKE ? OR entity_b LIKE ?",
-                        (f"%{chunk[1:]}%", f"%{chunk[1:]}%")
-                    ):
-                        neighbors.add(row[0])
-                        neighbors.add(row[1])
-                except Exception:
-                    pass
-            if not neighbors:
-                continue
-            for node in neighbors:
-                # 共现边权 = 能量传导
-                vec = _entity_vector(self.conn, chunk)
-                weight = vec.get(node, 0)
-                if weight > 0:
-                    activation[node] += weight
-                    activated_neighbors[node].add(chunk)
+            vec = _entity_vector(self.conn, chunk)
+            if not vec:
+                continue  # 该片段在共现网中无连接 → 跳过
+            matched.add(chunk)
+            for node, weight in vec.items():
+                activation[node] += weight
+                activated_by[node].add(chunk)
 
-        # ── 降低高频低信息量节点的能量 (叹词/功能词) ──
-        # 节点度太高 = 什么都连 = 信息量低 = 抑制能量
+        # 如果没有一个片段在共现网中有连接 → 零激活
+        if not matched:
+            return []
+
+        # ── Layer 1: 单跳扩散 ──
+        # 从 Layer 0 中能量 > 阈值的节点, 向它们的邻居扩散
+        DECAY_1 = 0.5
+        layer0_candidates = {
+            node for node, energy in activation.items() if energy > 1.0
+        }
+        for node in layer0_candidates:
+            vec = _entity_vector(self.conn, node)
+            for neighbor, weight in vec.items():
+                if neighbor not in activation:
+                    activation[neighbor] = weight * DECAY_1
+                    activated_by[neighbor].add(f"{node}(hop1)")
+
+        # ── Layer 2: 双跳扩散 ──
+        # 从新增的高能节点再扩散一次
+        DECAY_2 = 0.25
+        layer1_candidates = {
+            node for node, energy in activation.items()
+            if energy > 2.0 and node not in layer0_candidates
+        }
+        for node in layer1_candidates:
+            vec = _entity_vector(self.conn, node)
+            for neighbor, weight in vec.items():
+                if neighbor not in activation:
+                    activation[neighbor] = weight * DECAY_2
+                    activated_by[neighbor].add(f"{node}(hop2)")
+
+        # ── 抑制超连接节点 (功能词/高频词) ──
         for node in list(activation.keys()):
             degree = self._node_degree(node)
-            if degree > 50:  # 超连接节点 → 很可能不是有意义的概念
+            if degree > 50:
                 activation[node] *= 0.3
             elif degree > 20:
                 activation[node] *= 0.6
@@ -406,7 +423,7 @@ class CognitiveStarMap:
         return [{
             "node": node,
             "energy": round(energy, 4),
-            "triggers": list(activated_neighbors.get(node, set())),
+            "triggers": list(activated_by.get(node, set())),
             "degree": self._node_degree(node),
         } for node, energy in sorted_nodes if energy > 0.01]
 
