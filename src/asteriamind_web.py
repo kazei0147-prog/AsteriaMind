@@ -906,24 +906,24 @@ if __name__ == "__main__":
             nonlocal last_cycle
             now = time.time()
 
-            # 1. 保底定时 (5 分钟)
-            if now - last_cycle >= 300:
+            # 1. 保底定时 (2 分钟 — 更主动)
+            if now - last_cycle >= 120:
                 return True, "time_based"
 
-            # 2. MetaReasoning: 系统在衰退?
+            # 2. MetaReasoning: 高误差 → 需要学习
             try:
                 health = ci.mother.meta_reasoning.get_system_health()
-                if health.get("status") in ("degrading", "struggling"):
-                    return True, f"health_{health['status']}"
+                if health.get("avg_error", 0) > 0.3:
+                    return True, "health_high_error"
             except Exception:
                 pass
 
-            # 3. ActiveInference: 有高不确定性边?
+            # 3. ActiveInference: 不确定边 > 0.4 → 立即验证
             try:
-                uncertain = ci.mother.active_inference.most_uncertain_edges(top_k=1)
-                if uncertain and uncertain[0].get("uncertainty", 0) > 0.6:
-                    edge = uncertain[0]
-                    return True, f"uncertain_{edge['subj']}_{edge['pred']}_{edge['obj']}"
+                uncertain = ci.mother.active_inference.most_uncertain_edges(top_k=3)
+                for e in uncertain:
+                    if e.get("uncertainty", 0) > 0.4:
+                        return True, f"uncertain_{e['subj']}_{e['pred']}"
             except Exception:
                 pass
 

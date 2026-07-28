@@ -211,6 +211,23 @@ class MotherController:
         confidence = arbitration["confidence"]
 
         # ── 3. 产生结构化认知输出 (不是文本) ──
+        # 在生成语言前, 先检查是否需要自动搜索
+        auto_searched = False
+        if action in ("info_request", "observe") and confidence < 0.3 and subj:
+            # 激活能量低 + 置信度低 = 系统不认识这个主题 → 自动搜索
+            if self.active_learner and hasattr(self.active_learner, 'learn_relation'):
+                search_result = self.active_learner.learn_relation(subj, pred or "IS_A", obj)
+                if search_result.get("learned"):
+                    auto_searched = True
+                    cognitive_output["source"] = "auto_search"
+                    cognitive_output["evidence"] = [
+                        f"{fact['subj']} {fact['pred']} {fact['obj']}"
+                        for fact in search_result.get("facts", [])[:3]
+                    ]
+                    # 更新激活: 新知可能点亮新节点
+                    if self.star_map and subj:
+                        activation = self.star_map.spread_activate(subj, top_k=5)
+
         cognitive_output = {
             "subject": subj,
             "relation": pred,
