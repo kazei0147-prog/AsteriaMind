@@ -46,12 +46,25 @@ class LanguageGenerator:
 
         bucket = self._confidence_bucket(conf)
 
+        # ── 守卫: 非实体输入 / 非询问动作 → 直接走模板 ──
+        # 防止 "hello"、"嗯"、"哈哈" 被强行塞进学习到的句子骨架
+        if not self._looks_like_entity(subj):
+            return self._fallback_template(
+                action, subj, pred, obj, conf, evidence, diffs, source)
+        if action not in ("info_request", "fact_learn"):
+            return self._fallback_template(
+                action, subj, pred, obj, conf, evidence, diffs, source)
+
         # ── 1. language_traces 原始语料: 从真实句子里学表达 ──
         if self.star_map:
             lt = self._query_language_traces(action, pred, bucket)
             if lt and len(lt.get("sentences", [])) >= 2:
-                return self._generate_from_traces(
+                result = self._generate_from_traces(
                     lt, subj, pred, obj, evidence, diffs, conf)
+                # 兜底: 骨架生成结果如果还是不像话 (含未替换占位符或太短), 走模板
+                if result and "{subj}" not in result and "{obj}" not in result \
+                        and len(result) >= 4:
+                    return result
 
             # ── 2. lang_patterns 统计抽象 ──
             patterns = self.star_map.query_expression_patterns(
@@ -63,6 +76,34 @@ class LanguageGenerator:
         # ── 3. 模板回退 ──
         return self._fallback_template(
             action, subj, pred, obj, conf, evidence, diffs, source)
+
+    def _looks_like_entity(self, s: str) -> bool:
+        """
+        v3.5: 判断字符串是否像实体 (主语/宾语)。
+
+        防止 "hello"/"嗯"/"哈哈" 等非实体词被填进学习到的句子骨架。
+        """
+        if not s or len(s) < 2:
+            return False
+        # 必须是包含中文的字符串
+        if not any('\u4e00' <= c <= '\u9fff' for c in s):
+            return False
+        # 不能是纯语气词/代词
+        _stop = {'这', '那', '它', '他', '她', '我', '你', '什么', '怎么',
+                 '嗯', '啊', '哦', '唉', '哈', '嘿嘿', '哈哈', '哈哈',
+                 '哦哦', '哦哈', '呵呵', '嗯嗯', '好的', '是的', '对的'}
+        if s in _stop:
+            return False
+        # 不能含问号
+        if '?' in s or '?' in s:
+            return False
+        # 不能含"哈哈""嘻嘻"等纯笑声
+        if any(laugh in s for laugh in ('哈哈', '嘻嘻', '呵呵', '嘿嘿')):
+            return False
+        # 不能太短 (单字)
+        if len(s) < 2:
+            return False
+        return True
 
     def learn_from_reply(self, cognitive_output: dict, reply: str):
         """
