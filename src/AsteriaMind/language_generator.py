@@ -46,12 +46,11 @@ class LanguageGenerator:
 
         bucket = self._confidence_bucket(conf)
 
-        # ── 守卫: 非实体输入 / 非询问动作 → 直接走模板 ──
-        # 防止 "hello"、"嗯"、"哈哈" 被强行塞进学习到的句子骨架
-        if not self._looks_like_entity(subj):
-            return self._fallback_template(
-                action, subj, pred, obj, conf, evidence, diffs, source)
-        if action not in ("info_request", "fact_learn"):
+        # ── 门控: 基于信息熵的骨架绑定阈值 ──
+        # 不是"hello 看起来像实体吗"——是"hello 在星图中有语义权重吗?"
+        # 节点度为 0 + 无共现 → 信息量太低 → 不应与知识骨架绑定 → 走社交/观察路径
+        bc = self._binding_confidence(subj, pred, obj)
+        if bc < 0.15:
             return self._fallback_template(
                 action, subj, pred, obj, conf, evidence, diffs, source)
 
@@ -77,33 +76,43 @@ class LanguageGenerator:
         return self._fallback_template(
             action, subj, pred, obj, conf, evidence, diffs, source)
 
-    def _looks_like_entity(self, s: str) -> bool:
+    def _binding_confidence(self, subj: str, pred: str = "", obj: str = "") -> float:
         """
-        v3.5: 判断字符串是否像实体 (主语/宾语)。
+        v3.5: 基于信息熵的骨架绑定置信度。
 
-        防止 "hello"/"嗯"/"哈哈" 等非实体词被填进学习到的句子骨架。
+        不是"hello 看起来像实体吗?"——是"hello 在星图中有语义权重吗?"
+        节点度为 0 + 无共现 → 信息量太低 → 不应与知识骨架绑定。
+
+        "hello"   → 节点度 0, 共现 0  → confidence 0.0 → 回退社交路径
+        "嗯"      → 节点度 0, 共现 0  → confidence 0.0 → 回退
+        "企鹅"    → 节点度 22, 共现 15 → confidence 0.92 → 正常绑定
         """
-        if not s or len(s) < 2:
-            return False
-        # 必须是包含中文的字符串
-        if not any('\u4e00' <= c <= '\u9fff' for c in s):
-            return False
-        # 不能是纯语气词/代词
-        _stop = {'这', '那', '它', '他', '她', '我', '你', '什么', '怎么',
-                 '嗯', '啊', '哦', '唉', '哈', '嘿嘿', '哈哈', '哈哈',
-                 '哦哦', '哦哈', '呵呵', '嗯嗯', '好的', '是的', '对的'}
-        if s in _stop:
-            return False
-        # 不能含问号
-        if '?' in s or '?' in s:
-            return False
-        # 不能含"哈哈""嘻嘻"等纯笑声
-        if any(laugh in s for laugh in ('哈哈', '嘻嘻', '呵呵', '嘿嘿')):
-            return False
-        # 不能太短 (单字)
-        if len(s) < 2:
-            return False
-        return True
+        if not subj or not self.star_map:
+            return 0.0
+
+        degree = 0
+        try:
+            # cognitive_traces 中的节点度
+            for row in self.star_map.conn.execute(
+                "SELECT COUNT(*) FROM cognitive_traces WHERE subj=? OR obj=?",
+                (subj, subj)
+            ):
+                degree = row[0]
+            # co_occurrence 中的共现边权 (折半计入)
+            for row in self.star_map.conn.execute(
+                "SELECT COUNT(*) FROM co_occurrence WHERE entity_a=? OR entity_b=?",
+                (subj, subj)
+            ):
+                degree += row[0] * 0.5
+        except Exception:
+            pass
+
+        if degree == 0:
+            return 0.0
+
+        # 对数缩放: 1-2 条边≈0.3, 5 条≈0.5, 20 条≈0.9
+        import math
+        return min(1.0, math.log(degree + 1) / math.log(10))
 
     def learn_from_reply(self, cognitive_output: dict, reply: str):
         """
