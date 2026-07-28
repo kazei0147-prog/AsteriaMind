@@ -38,9 +38,9 @@ def _build_cooccur_from_traces(conn: sqlite3.Connection):
             evidence_count INTEGER DEFAULT 1,
             last_update REAL DEFAULT 0,
             PRIMARY KEY (entity_a, entity_b)
-        );
-
-        -- v3.5: 有向边 — 保留关系的方向和类型
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS directed_edges (
             source TEXT NOT NULL,
             target TEXT NOT NULL,
@@ -50,10 +50,10 @@ def _build_cooccur_from_traces(conn: sqlite3.Connection):
             evidence_count INTEGER DEFAULT 1,
             last_update REAL DEFAULT 0,
             PRIMARY KEY (source, target, relation)
-        );
-        CREATE INDEX IF NOT EXISTS idx_de_source ON directed_edges(source);
-        CREATE INDEX IF NOT EXISTS idx_de_target ON directed_edges(target);
+        )
     """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_de_source ON directed_edges(source)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_de_target ON directed_edges(target)")
     for row in cur.execute("SELECT subj, pred, obj, feedback FROM cognitive_traces"):
         subj, pred, obj = (row[0] or "").strip(), (row[1] or "").strip(), (row[2] or "").strip()
         fb = row[3] or "confirmed"
@@ -105,30 +105,96 @@ def _incr_directed(cur, source: str, target: str, relation: str = "",
         (source, target, relation, conf_boost, ts, conf_boost, ts))
 
 
-def _directed_vector(conn, entity: str, direction: str = "out") -> dict[str, float]:
+def _effective_weight(row) -> float:
+    """动态边权: weight × confidence × time_decay"""
+    weight = row[0] if isinstance(row, tuple) else row["weight"]
+    conf = row[1] if isinstance(row, tuple) else row["confidence"]
+    last_up = row[2] if isinstance(row, tuple) else row["last_update"]
+    decay = math.exp(-DECAY_LAMBDA * (time.time() - (last_up or 0)) / 86400)
+    return float(weight) * float(conf) * float(decay)
+
+
+def _directed_vector(conn, entity: str, direction: str = "out",
+                      pmi_threshold: float = -0.5) -> dict[str, float]:
     """
-    有向向量:
-      direction='out': entity → target 的出边
-      direction='in':  source → entity 的入边
-      direction='both': 出+入
+    有向向量 + PMI 过滤。
+
+    PMI(x,y) = log(P(x,y) / P(x)P(y))
+    NPMI = PMI / -log(P(x,y))
+
+    只保留 NPMI > 0.2 的边—过滤掉偶然共现噪声。
+    "蛇 →[ORBITS]→ 地球" (w=1, rare) → PMI < 0 → 被过滤
+    "月球→[ORBITS]→地球" (w=5, frequent) → PMI > 2 → 保留
+
+    direction='out': entity → target 的出边
+    direction='in':  source → entity 的入边
+    direction='both': 出+入
     """
     vec = {}
-    if direction in ("out", "both"):
-        for row in conn.execute(
-            "SELECT target, weight, confidence, last_update, relation "
-            "FROM directed_edges WHERE source=? ORDER BY weight DESC", (entity,)):
-            w = _effective_weight(row[:3])
-            if w > 0.01:
-                key = row[3] if row[3] else row[0]
-                vec[key] = max(vec.get(key, 0), w)
-    if direction in ("in", "both"):
-        for row in conn.execute(
-            "SELECT source, weight, confidence, last_update, relation "
-            "FROM directed_edges WHERE target=? ORDER BY weight DESC", (entity,)):
-            w = _effective_weight(row[:3])
-            if w > 0.01:
-                key = row[3] if row[3] else row[0]
-                vec[key] = max(vec.get(key, 0), w * 0.8)  # 入边稍降权
+    total_weight = conn.execute(
+        "SELECT COALESCE(SUM(weight), 1) FROM directed_edges").fetchone()[0] + 1e-6
+
+    for col, entity_col, dir_weight in (
+        ("target", "source", 1.0),
+        ("source", "target", 0.8),
+    ):
+        if direction == "out" and col == "source":
+            continue
+        if direction == "in" and col == "target":
+            continue
+        query = f"SELECT {col}, weight, confidence, last_update, relation FROM directed_edges WHERE {entity_col}=?"
+        for row in conn.execute(query, (entity,)):
+            neighbor, weight, conf, last_up, rel = row
+            w = _effective_weight((weight, conf, last_up))
+            if w < 1.5:  # 边太弱, 跳过 PMI 计算
+                continue
+
+            # ── PMI 计算 ──
+            # P(x,y) = edge_weight / total
+            # P(x)   = source_degree / total
+            # P(y)   = target_degree / total
+            p_xy = w / total_weight
+            if p_xy <= 0:
+                continue
+
+            if col == "target":
+                src_deg = conn.execute(
+                    "SELECT SUM(weight) FROM directed_edges WHERE source=?",
+                    (entity,)).fetchone()[0] or 1
+                tgt_deg = conn.execute(
+                    "SELECT SUM(weight) FROM directed_edges WHERE target=?",
+                    (neighbor,)).fetchone()[0] or 1
+            else:
+                src_deg = conn.execute(
+                    "SELECT SUM(weight) FROM directed_edges WHERE source=?",
+                    (neighbor,)).fetchone()[0] or 1
+                tgt_deg = conn.execute(
+                    "SELECT SUM(weight) FROM directed_edges WHERE target=?",
+                    (entity,)).fetchone()[0] or 1
+
+            p_x = src_deg / total_weight
+            p_y = tgt_deg / total_weight
+
+            if p_x * p_y <= 0:
+                continue
+            pmi = math.log(p_xy / (p_x * p_y))
+            npmi = pmi / (-math.log(p_xy)) if p_xy > 0 else 0
+
+            # ── NPMI 作为边权重系数 ──
+            # NPMI < 0  → 硬裁剪 (偶然共现, 不导电)
+            # NPMI ~ 0  → 极弱传导
+            # NPMI > 0.4 → 强因果/逻辑边
+            npmi = pmi / (-math.log(p_xy)) if p_xy > 0 else 0
+
+            if npmi < 0:  # 硬裁剪: 负 NPMI → 噪声边, 直接丢弃
+                continue
+
+            key = neighbor  # 目标实体为键 (蛇, 不是 IS_A)
+            # 返回 (有效权重, NPMI, relation) — 三元元组
+            edge_w = w * dir_weight
+            prev = vec.get(key, (0, 0, ""))
+            vec[key] = (max(prev[0], edge_w), npmi, prev[2] or rel)
+
     return vec
     """动态边权: weight × confidence × time_decay"""
     weight = row[0] if isinstance(row, tuple) else row["weight"]
@@ -441,25 +507,26 @@ class CognitiveStarMap:
         activation: dict[str, float] = defaultdict(float)
         activated_by: dict[str, set] = defaultdict(set)
 
-        # ── Layer 0: 精确匹配 (优先有向边) ──
+        # ── Layer 0: 精确匹配 (优先有向边 + NPMI 过滤) ──
         matched = set()
         for chunk in chunks:
-            # 优先有向向量: "森蚺" → 出边 [蛇]
             vec = _directed_vector(self.conn, chunk, "out")
+            is_directed = bool(vec)
             if not vec:
                 vec = _entity_vector(self.conn, chunk)  # 回退无向共现
             if not vec:
                 continue
             matched.add(chunk)
-            for node, weight in vec.items():
-                activation[node] += weight
+            for node, val in vec.items():
+                w, npmi = (val[0], val[1]) if isinstance(val, tuple) else (val, 1.0)
+                activation[node] += w
                 activated_by[node].add(chunk)
 
         if not matched:
-            # ── 自锚: 零激活时检查自我概念触发 ──
             return self._anchor_activation(text)
 
-        # ── Layer 1: 单跳扩散 (γ=0.3) ──
+        # ── Layer 1: 单跳扩散 (γ × sigmoid(NPMI)) ──
+        gamma = 0.3
         layer0_candidates = {
             node for node, energy in activation.items() if energy > 1.0
         }
@@ -467,12 +534,16 @@ class CognitiveStarMap:
             vec = _directed_vector(self.conn, node, "out")
             if not vec:
                 vec = _entity_vector(self.conn, node)
-            for neighbor, weight in vec.items():
-                if neighbor not in activation:
-                    activation[neighbor] = weight * gamma  # steep decay
-                    activated_by[neighbor].add(f"{node}(h1)")
+            for neighbor, val in vec.items():
+                if neighbor in activation:
+                    continue
+                w, npmi = (val[0], val[1]) if isinstance(val, tuple) else (val, 1.0)
+                # 动态衰减: γ × sigmoid(NPMI)
+                decay = gamma * (1.0 / (1.0 + math.exp(-5.0 * (npmi - 0.3))))
+                activation[neighbor] = w * decay
+                activated_by[neighbor].add(f"{node}(h1)")
 
-        # ── Layer 2: 双跳 (γ²=0.09, 几乎不可见) ──
+        # ── Layer 2: 双跳 (γ² × sigmoid²) ──
         layer1_candidates = {
             node for node, energy in activation.items()
             if energy > 3.0 and node not in layer0_candidates
@@ -481,10 +552,13 @@ class CognitiveStarMap:
             vec = _directed_vector(self.conn, node, "out")
             if not vec:
                 vec = _entity_vector(self.conn, node)
-            for neighbor, weight in vec.items():
-                if neighbor not in activation:
-                    activation[neighbor] = weight * gamma * gamma
-                    activated_by[neighbor].add(f"{node}(h2)")
+            for neighbor, val in vec.items():
+                if neighbor in activation:
+                    continue
+                w, npmi = (val[0], val[1]) if isinstance(val, tuple) else (val, 1.0)
+                decay = gamma * gamma * (1.0 / (1.0 + math.exp(-5.0 * (npmi - 0.3))))
+                activation[neighbor] = w * decay
+                activated_by[neighbor].add(f"{node}(h2)")
 
         # ── 过滤谓词标签 ──
         _skip = {"IS_A", "CAN", "BELONGS_TO", "NOT_IS_A",
