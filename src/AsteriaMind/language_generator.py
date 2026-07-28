@@ -458,7 +458,12 @@ class LanguageGenerator:
             return f"我是 AsteriaMind。{evidence[0] if evidence else ''}"
 
         if action in ("uncertain", "observe"):
-            return f"我不太确定你的意思。试试说「X是Y」或「X会Y吗」?"
+            # ── v3.5: 能量感知的不确定表达 ──
+            # 不是死板的"试试说X是Y"——而是告诉用户: 我的星图里这个区域是暗的
+            if subj:
+                return (f"我的认知网里没有捕获到「{subj}」的高亮信号——"
+                        f"你在谈论一个全新的概念吗？")
+            return "我没有捕获到清晰的信号。你能换个方式描述吗？"
 
         return f"[{action}] {subj} {pred} {obj}"
 

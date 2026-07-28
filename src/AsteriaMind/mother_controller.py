@@ -163,6 +163,22 @@ class MotherController:
         obj = struct.get("object", "") or ""
         prag_type = prag.get("type", "unknown") if isinstance(prag, dict) else getattr(prag, "type", "unknown")
 
+        # ── 0.5. Spreading Activation: 能量驱动的认知焦点 ★ v3.5 ★ ──
+        # 不做 WHERE subj=? 精确查询。把文本所有 n-gram 丢进共现网,
+        # 让能量扩散来告诉系统"哪些节点被点亮了"。
+        cognitive_focus = "regex"  # 默认来源
+        if self.star_map and text:
+            activation = self.star_map.spread_activate(text, top_k=3)
+            if activation and activation[0]["energy"] > 0.3:
+                top_node = activation[0]
+                # 能量驱动的焦点 vs 正则提取的实体: 能量高的胜出
+                if top_node["node"] != subj and len(top_node["node"]) >= 2:
+                    cognitive_focus = "activation_driven"
+                    obj = subj  # 旧主语变成可能的客体
+                    subj = top_node["node"]
+        else:
+            activation = None
+
         # ── 1. ActiveInference: 查询信念 ���─
         belief = None
         if subj and pred:
