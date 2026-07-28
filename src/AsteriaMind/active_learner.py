@@ -196,11 +196,13 @@ class ActiveLearner:
 
         # 3. 搜网络
         learned_facts = []
+        all_search_results = []  # ★ 收集所有原始搜索结果
         for query in queries:
             if not self.web_search:
                 break
             try:
                 search_results = self.web_search.search(query, max_results=3)
+                all_search_results.extend(search_results)
                 for r in search_results:
                     snippet = r.snippet or ""
                     # 过滤占位符结果
@@ -215,7 +217,7 @@ class ActiveLearner:
             except Exception:
                 pass
 
-        # 4. 存入星图
+        # 4. 存入星图 (三元组 + 原始句子)
         if learned_facts and self.star_map:
             seen = set()
             for fact in learned_facts:
@@ -228,6 +230,10 @@ class ActiveLearner:
                     "confirmed",
                     f"online_learning: {fact.get('source_query', '')[:40]}"
                 )
+
+            # ★ v3.5: 搜索结果原始句子 → language_traces 表达语料
+            self._store_search_sentences(all_search_results, subj, pred, obj)
+
             result["learned"] = True
             result["source"] = "web_search"
             result["facts"] = learned_facts
@@ -265,6 +271,46 @@ class ActiveLearner:
         else:
             queries.append(f"{subj} {obj} 是什么")
         return queries
+
+    def _store_search_sentences(self, search_results: list,
+                                 subj: str, pred: str, obj: str):
+        """
+        v3.5: 把搜索结果的原始句子存入 language_traces 作为表达语料。
+
+        这解决了"小冰/小爱能学会说话，AM 为什么不行?"的问题——
+        她们从网络文本中学自然表达，我们现在也从搜索结果中学。
+
+        只存包含查询实体的句子，避免噪声。
+        """
+        if not self.star_map:
+            return
+        stored = 0
+        for r in search_results:
+            snippet = r.snippet if hasattr(r, 'snippet') else ""
+            if not snippet:
+                continue
+            if any(m in snippet for m in ("搜索未返回", "需WebSearch", "搜索不可用", "搜索异常")):
+                continue
+            # 按标点分句
+            for sent in re.split(r'[。.！!？?\n\r]+', snippet):
+                sent = sent.strip()
+                if len(sent) < 8:
+                    continue
+                # 只存包含查询实体的句子
+                if subj not in sent:
+                    continue
+                pattern = self.star_map._language_pattern(sent)
+                try:
+                    self.star_map.conn.execute(
+                        "INSERT INTO language_traces"
+                        "(sentence,subj,pred,obj,cognitive_id,pattern_type,timestamp) "
+                        "VALUES(?,?,?,?,NULL,?,?)",
+                        (sent, subj, pred, obj, pattern, time.time()))
+                    stored += 1
+                except Exception:
+                    pass
+        if stored:
+            self.star_map.conn.commit()
 
     def _extract_facts(self, subj: str, pred: str, obj: str,
                        snippet: str) -> list[dict]:
