@@ -875,18 +875,58 @@ if __name__ == "__main__":
 
     threading.Thread(target=_consolidation_loop, daemon=True).start()
 
-    # 后台离线学习线程: 每 300 秒跑一次 (AM 闲时自主学习)
+    # 后台离线学习线程: 状态感知的自我唤醒
     def _offline_learn_loop():
-        while True:
-            time.sleep(300)
+        last_cycle = time.time()
+        wake_log: list[str] = []  # 唤醒原因记录
+
+        def _should_wake() -> tuple[bool, str]:
+            """状态感知唤醒: 不只定时, 也听系统自己的声音"""
+            nonlocal last_cycle
+            now = time.time()
+
+            # 1. 保底定时 (5 分钟)
+            if now - last_cycle >= 300:
+                return True, "time_based"
+
+            # 2. MetaReasoning: 系统在衰退?
             try:
-                result = ci.offline_learner.run_cycle()
-                if result.get("proposals", 0) > 0:
-                    print(f"\n  🔍 Offline Learning: "
-                          f"proposals={result['proposals']} "
-                          f"winners={result['winners']} "
-                          f"learned={result['learned']} "
-                          f"skipped={result['skipped']}")
+                health = ci.mother.meta_reasoning.get_system_health()
+                if health.get("status") in ("degrading", "struggling"):
+                    return True, f"health_{health['status']}"
+            except Exception:
+                pass
+
+            # 3. ActiveInference: 有高不确定性边?
+            try:
+                uncertain = ci.mother.active_inference.most_uncertain_edges(top_k=1)
+                if uncertain and uncertain[0].get("uncertainty", 0) > 0.6:
+                    edge = uncertain[0]
+                    return True, f"uncertain_{edge['subj']}_{edge['pred']}_{edge['obj']}"
+            except Exception:
+                pass
+
+            return False, ""
+
+        while True:
+            time.sleep(30)  # 轻量轮询, 30s 检查一次
+            try:
+                should, reason = _should_wake()
+                if should:
+                    # 记录唤醒原因
+                    wake_log.append(f"{time.strftime('%H:%M:%S')} wake: {reason}")
+                    if len(wake_log) > 20:
+                        wake_log = wake_log[-20:]
+
+                    result = ci.offline_learner.run_cycle()
+                    last_cycle = time.time()
+
+                    if result.get("proposals", 0) > 0:
+                        print(f"\n  🔍 Offline Learning ({reason}): "
+                              f"proposals={result['proposals']} "
+                              f"winners={result['winners']} "
+                              f"learned={result['learned']} "
+                              f"skipped={result['skipped']}")
             except Exception as e:
                 print(f"\n  ⚠️ Offline learning error: {e}")
 
