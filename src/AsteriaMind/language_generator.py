@@ -46,6 +46,14 @@ class LanguageGenerator:
 
         bucket = self._confidence_bucket(conf)
 
+        # ── v3.6: 能量驱动的策略选择 ──
+        energy_level = "medium"
+        if self.star_map and hasattr(self.star_map, 'energy_level'):
+            energy_level = self.star_map.energy_level()
+        if energy_level == "critical":
+            return ("我的认知能量很低——很多节点的激活不足。"
+                    "你可以教我新知识来帮我恢复能量。")
+
         # ── v3.5: 能量驱动的认知焦点 → 优先使用激活上下文 ──
         focus = cognitive_output.get("cognitive_focus", "regex")
         activation = cognitive_output.get("activation")

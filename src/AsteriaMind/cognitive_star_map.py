@@ -196,12 +196,6 @@ def _directed_vector(conn, entity: str, direction: str = "out",
             vec[key] = (max(prev[0], edge_w), npmi, prev[2] or rel)
 
     return vec
-    """动态边权: weight × confidence × time_decay"""
-    weight = row[0] if isinstance(row, tuple) else row["weight"]
-    conf = row[1] if isinstance(row, tuple) else row["confidence"]
-    last_up = row[2] if isinstance(row, tuple) else row["last_update"]
-    decay = math.exp(-DECAY_LAMBDA * (time.time() - (last_up or 0)) / 86400)  # 按天衰减
-    return float(weight) * float(conf) * float(decay)
 
 
 def _entity_vector(conn, entity: str) -> dict[str, float]:
@@ -244,13 +238,16 @@ def _sparse_cosine(v1: dict[str, float], v2: dict[str, float]) -> float:
 # ═══════════════════════════════════════
 
 class CognitiveStarMap:
-    """统一星图——共现向量 + 语言涌现"""
+    """统一星图——共现向量 + 语言涌现 + 能量代谢"""
 
     def __init__(self, db_path: str = "asteriamind.db"):
         self.conn = sqlite3.connect(db_path)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._ensure_table()
         _build_cooccur_from_traces(self.conn)
+        # v3.6: 系统能量追踪
+        self.system_energy = 1.0
+        self._init_energy()
 
     def _ensure_table(self):
         c = self.conn.cursor()
@@ -325,7 +322,46 @@ class CognitiveStarMap:
                 s, p, o = (row[0] or "").strip(), (row[1] or "").strip(), (row[2] or "").strip()
                 if s and o and p:
                     _incr_directed(c, s, o, p, row[3] or "confirmed", time.time())
+        # v3.6: 能量列迁移
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='directed_edges'")
+        if c.fetchone():
+            cols = {r[1] for r in c.execute("PRAGMA table_info(directed_edges)")}
+            if "energy" not in cols:
+                c.execute("ALTER TABLE directed_edges ADD COLUMN energy REAL DEFAULT 1.0")
         self.conn.commit()
+
+    def _init_energy(self):
+        """从已有边统计计算初始系统能量"""
+        total = self.conn.execute(
+            "SELECT COALESCE(SUM(energy), 0) FROM directed_edges").fetchone()[0]
+        count = self.conn.execute(
+            "SELECT COUNT(*) FROM directed_edges").fetchone()[0]
+        self.system_energy = min(1.0, total / max(count * 1.0, 1)) if count > 0 else 0.5
+
+    def consume_energy(self, source: str, target: str, amount: float = 0.02):
+        """扩散时消耗边能量 — 代谢消耗"""
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE directed_edges SET energy=MAX(0.05, energy - ?) "
+            "WHERE source=? AND target=?", (amount, source, target))
+        self.system_energy = max(0.1, self.system_energy - amount * 0.1)
+        self.conn.commit()
+
+    def restore_energy(self, source: str, target: str, amount: float = 0.05):
+        """验证正确后恢复边能量 — 代谢补充"""
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE directed_edges SET energy=MIN(2.0, energy + ?) "
+            "WHERE source=? AND target=?", (amount, source, target))
+        self.system_energy = min(1.0, self.system_energy + amount * 0.15)
+        self.conn.commit()
+
+    def energy_level(self) -> str:
+        """系统能量水平 → 策略选择"""
+        if self.system_energy > 0.7: return "high"    # 多跳扩散 + 主动搜索
+        if self.system_energy > 0.4: return "medium"  # 单跳扩散 + 模板
+        if self.system_energy > 0.15: return "low"    # 保守: 零跳 + 回退
+        return "critical"  # 能量枯竭: 求助模式
 
     @staticmethod
     def _language_pattern(sentence: str) -> str:
@@ -525,10 +561,9 @@ class CognitiveStarMap:
         if not matched:
             return self._anchor_activation(text)
 
-        # ── Layer 1: 单跳扩散 (γ × sigmoid(NPMI)) ──
-        gamma = 0.3
+        # ── Layer 1: 单跳扩散 (能量 × sigmoid(NPMI)) ──
         layer0_candidates = {
-            node for node, energy in activation.items() if energy > 1.0
+            node for node, nrg in activation.items() if nrg > 1.0
         }
         for node in layer0_candidates:
             vec = _directed_vector(self.conn, node, "out")
@@ -538,27 +573,40 @@ class CognitiveStarMap:
                 if neighbor in activation:
                     continue
                 w, npmi = (val[0], val[1]) if isinstance(val, tuple) else (val, 1.0)
-                # 动态衰减: γ × sigmoid(NPMI)
-                decay = gamma * (1.0 / (1.0 + math.exp(-5.0 * (npmi - 0.3))))
+                # 边能量衰减: 高能边全速导电, 低能边几近断路
+                edge_energy = self.conn.execute(
+                    "SELECT COALESCE(energy, 1.0) FROM directed_edges "
+                    "WHERE source=? AND target=? LIMIT 1",
+                    (node, neighbor)).fetchone()
+                edge_nrg = edge_energy[0] if edge_energy else 0.5
+                decay = edge_nrg * (1.0 / (1.0 + math.exp(-5.0 * (npmi - 0.3))))
                 activation[neighbor] = w * decay
+                self.consume_energy(node, neighbor, 0.01)  # 代谢消耗
                 activated_by[neighbor].add(f"{node}(h1)")
 
-        # ── Layer 2: 双跳 (γ² × sigmoid²) ──
-        layer1_candidates = {
-            node for node, energy in activation.items()
-            if energy > 3.0 and node not in layer0_candidates
-        }
-        for node in layer1_candidates:
-            vec = _directed_vector(self.conn, node, "out")
-            if not vec:
-                vec = _entity_vector(self.conn, node)
-            for neighbor, val in vec.items():
-                if neighbor in activation:
-                    continue
-                w, npmi = (val[0], val[1]) if isinstance(val, tuple) else (val, 1.0)
-                decay = gamma * gamma * (1.0 / (1.0 + math.exp(-5.0 * (npmi - 0.3))))
-                activation[neighbor] = w * decay
-                activated_by[neighbor].add(f"{node}(h2)")
+        # ── Layer 2: 双跳 (仅系统能量>0.7时启用) ──
+        if self.system_energy > 0.7:
+            layer1_candidates = {
+                node for node, nrg in activation.items()
+                if nrg > 3.0 and node not in layer0_candidates
+            }
+            for node in layer1_candidates:
+                vec = _directed_vector(self.conn, node, "out")
+                if not vec:
+                    vec = _entity_vector(self.conn, node)
+                for neighbor, val in vec.items():
+                    if neighbor in activation:
+                        continue
+                    w, npmi = (val[0], val[1]) if isinstance(val, tuple) else (val, 1.0)
+                    edge_energy = self.conn.execute(
+                        "SELECT COALESCE(energy, 1.0) FROM directed_edges "
+                        "WHERE source=? AND target=? LIMIT 1",
+                        (node, neighbor)).fetchone()
+                    edge_nrg = edge_energy[0] if edge_energy else 0.3
+                    decay = edge_nrg * edge_nrg * (1.0 / (1.0 + math.exp(-5.0 * (npmi - 0.3))))
+                    activation[neighbor] = w * decay
+                    self.consume_energy(node, neighbor, 0.005)
+                    activated_by[neighbor].add(f"{node}(h2)")
 
         # ── 过滤谓词标签 ──
         _skip = {"IS_A", "CAN", "BELONGS_TO", "NOT_IS_A",
