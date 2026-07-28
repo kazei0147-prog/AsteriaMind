@@ -1,132 +1,113 @@
 # AsteriaMind (formerly HiveMind)
 
-**一种基于贝叶斯信念、符号+语义双层表征、自演化认知系统架构**
+**一个知道自己不知道什么、能主动填补盲区、会从错误中学会不再犯的认知系统**
 
 > v0.1-v0.6: HiveMind (存档) — 多模块加权平均  
 > v2.x: AsteriaMind — 贝叶斯信念 + 论证评估 + 四层自治  
-> v3.2: 跨层认知 — 符号+语义桥接 + 自主聚类 + 认知演化 + 来源链审计
+> v3.2: 跨层认知 — 符号+语义桥接 + 自主聚类  
+> **v3.5: 认知闭环 — 双循环学习 + 主动推理 + 元反思 + 语言涌现**
 
-*Last updated: 2026-07-22*
-
----
-
-## 核心能力速览 (v3.2)
-
-| 层级 | 能力 |
-|------|------|
-| 符号层 | O(1) 索引 — α/β 贝叶斯信念, 反证据链, 来源追踪 |
-| 语义层 | TF-IDF 向量 — 类比发现, 模糊搜索, 隐藏关联识别 |
-| 桥接层 | 自动聚类→符号映射, 方向向量, 跨层知识生成, 智能查询路由 |
-| 治理层 | 能量经济, 模板注册/退役, 奥卡姆剃刀, 来源链审计 |
-| 元认知 | 信念压力测试, 认知演化 (MH→审稿→现实验证→注册) |
-| IA+KA | 文本→主张→同化, 网络搜索, 冲突/拒绝/竞技场 |
-| 防护 | 来源链不可逆, 人类异步审核, 多源权重 |
+*Last updated: 2026-07-28*
 
 ---
 
-## 一、摘要
+## v3.5 新能力速览
 
-AsteriaMind 是一套**符号与语义双层表征、自演化认知架构**。
-
-> 如果一个认知系统同时拥有精确符号推理和模糊语义联想两种表示层，并且两层之间能够自主发现结构、互相映射——那么她可以在不依赖大规模参数扩展的前提下，通过增加知识间的连接密度来提升有效智能。
-
-**vs LLM：**
-
-| | LLM | AsteriaMind |
-|---|---|---|
-| 知识存储 | 分布式权重, 隐式 | 显式三元组 + 向量嵌入 双层 |
-| 学习方式 | 离线训练 | 在线增量, α/β 实时更新 |
-| 查询方式 | 生成式 | 精确索引 O(1) + 语义相似度 |
-| 可解释性 | 黑箱 | 每条知识有完整来源链 + 反证据记录 |
-| 规模瓶颈 | 参数数量 | 知识间连接密度 |
-| 自我改进 | 需要重新训练 | 认知演化: 候选→审稿→验证→注册 |
+| 层级 | 能力 | 一句话 |
+|------|------|--------|
+| 🧠 在线学习 | 用户问 → 搜索 → 提取 → 信念更新 → 回答 | 不知道的就搜，搜到就学，学完就答 |
+| 🌙 离线学习 | 状态感知自我唤醒 → BudgetContest 选最优探索 | 闲着也不闲，主动补全知识盲区 |
+| 🔮 主动推理 | 预测→检索→回复 在线推理链 | 不只被动回答，会主动建议下一步 |
+| 🪞 元反思 | 回答→反馈→自我评估→下次更好 | 错了知道为什么错，不再重复 |
+| 📖 语言涌现 | 从语料库学句式骨架，语气+内容解耦 | 表达方式随语料增长自然多样化 |
+| 🔍 广谱搜索学习 | DuckDuckGo 搜索原句进 language_traces | 不只学事实，也学怎么说 |
 
 ---
 
-## 二、核心模块 (22 文件)
+## 架构总览
 
-| 模块 | 文件 | 职责 |
-|---|---|---|
-| **KnowledgeGraph** | `knowledge.py` | O(1) 索引 — α/β 贝叶斯信念, 反证据链, JSON/SQLite 持久化 |
-| **VectorLayer** | `vector_layer.py` | TF-IDF 语义向量 — 类比, 模糊搜索, 关联发现 |
-| **CrossLayerBridge** | `cross_layer.py` | 符号↔语义桥接 — 自动聚类, 方向向量, 跨层映射 |
-| **QueryRouter** | `cross_layer.py` | 智能路由 — 精确/语义/混合 自动选择 |
-| **TextPipeline** | `text_pipeline.py` | IA+KA — 文本→主张→同化, 来源追踪 |
-| **HypothesisEngine** | `hypothesis_template.py` | 从 Registry 取模板生成竞争假说 |
-| **TemplateRegistry** | `hypothesis_template.py` | 可插拔假说模板 (H1-H6 只是初始注册项) |
-| **TheoryGovernance** | `hypothesis_template.py` | 能量经济, 退役/降级, 版本管理 |
-| **CognitiveEvolutionLayer** | `cognitive_evolution.py` | MH→候选→审稿→现实验证→注册 |
-| **CertaintyAudit** | `certainty_audit.py` | 信念压力测试 — 找到"太舒服"的高置信度信念 |
-| **FalsificationController** | `falsification.py` | 反证控制 — 知道什么时候停 |
-| **HumanReview** | `human_review.py` | 异步审核 + 来源链防篡改 |
-| **WebSearchInterface** | `falsification.py` | 网络搜索适配器 |
-| **MetaHypothesisGenerator** | `meta_hypothesis.py` | 元假说 — "我为什么总是想不明白?" |
-| **MotherMind** | `mother.py` | 决策者 — 综合 Learner 推理链 |
-| **Learner x3** | `learner.py` | 贝叶斯信念节点 (optimist/pessimist/skeptic) |
-| **MetaLearner** | `meta_learner.py` | 多基函数选择 (多项式/Fourier/指数) |
-
-**统一入口**: `python asteriamind.py --interactive`
-
-**REPL 命令**: learn / ask / predict / verify / explore / fetch / read / audit / index / semantic / analogy / assoc / bridge / route / review / provenance / status / knowledge
-
----
-
-## 三、核心架构洞见
-
-**α/β 信念系统**: 每条知识不是单一置信度——是 Beta(α,β) 分布。α 累积支持证据, β 累积反证据。隐藏变量发现 (β 追上 α), 科学革命 (0.99 → 动摇), 主动拒绝——都从 α/β 博弈中自然涌现。
-
-**双层表征**: 符号层做精确推理 O(1), 语义层做模糊联想。两层之间的桥接层自主发现聚类, 将向量空间的结构映射回符号知识——"提神类物质"不是人定义的, 是从嵌入空间中涌现的。
-
-**可插拔理论体系**: H1-H6 不是写死在代码里的 if 分支——它们是注册进 TemplateRegistry 的六个默认模板。新理论通过认知演化层 (MH→审稿→现实验证→注册) 自主加入, 能量经济决定哪个理论值得保留。
-
-**防护 = 透明**: 每条知识记录完整来源链 (谁说的, 什么时候, 中间被谁修正过)。管理员可以异步纠正但原记录永久保留——透明的审计能力比任何密钥都更强。
-
-**规模增长 = 连接密度**: AM 的有效规模瓶颈不是参数数量, 是知识间的连接密度。符号层的关联边 + 语义层的向量聚类 + 桥接层的跨层映射——三条路径同时增加知识间的互连。
-
----
-
-## 四、快速开始
-
-```bash
-cd src
-python asteriamind.py --interactive
-
-# 教她知识
-learn 咖啡 CAUSES 清醒 0.9
-
-# 文本同化 (IA+KA 管道)
-read 咖啡降低血压但增加心率。| 医学期刊 | 0.8
-
-# 自主探索闭环
-explore
-
-# 语义搜索
-index
-semantic 什么东西提神
-
-# 跨层桥接
-bridge
-
-# 信念压力测试
-audit
-
-# 来源审查
-provenance 咖啡--[CAUSES]-->清醒
+```
+输入 → Semantic → Pragmatic → ActiveInference → MetaCognition → 回复
+         │            │              │                │
+         │            │              │                │
+    cognitive_    pragmatic      choose_action    weighted_vote
+    traces        intent         plan_actions     (学习权重)
+         │                           │                │
+         └───────────┬───────────────┘                │
+                     │                                │
+              CognitiveStarMap                  MetaReasoning
+              (共现矩阵+语料库)                  (反思→闭环)
+                     │
+         ┌───────────┼───────────┐
+         │           │           │
+    OnlineLoop  OfflineLoop  DreamModule
+    (用户驱动)  (自我唤醒)  (假说生成)
+         │           │
+    ActiveLearner ← BudgetContest
+    (KG→星图→搜索→用户)
 ```
 
 ---
 
-## v0.x 存档
+## 核心设计原则
 
-旧的 HiveMind v0.6 (能量经济 + 多模块加权平均) 代码保留在 `src/hivemind/`, 失败复盘见 `docs/WHY_HIVEMIND_FAILED.md`.
+**不是"改良现有 AI 范式"，是侧向偏移**——用时间置换算力，用内部制衡置换外部依赖。
 
-GitHub: https://github.com/kazei0147-prog/AsteriaMind
+三元组是骨架，不是终点。被压扁的结构化知识丢掉的信息，由系统的交互机制重新长出来：
+
+| 三元组丢掉的 | 由什么补回来 |
+|-------------|-------------|
+| 隐含关联 | 共现矩阵 — "企鹅"和"南极"没直接关系，但经常一起出现→边权上升 |
+| 不确定性 | ActiveInference Beta 分布 — "我有多确定？有无矛盾证据？" |
+| 系统性盲区 | MetaReasoning 反思 — "我总是在鸟类分类上出错" |
+| 自然表达 | LanguageGenerator — 从 language_traces 学句式骨架 |
+| 未知的未知 | DreamModule — "企鹅的迁徙关系为空，推测与海豹相似" |
 
 ---
 
-## 历史存档
+## v3.5 核心模块
 
-v3.1 版本的完整 README (含多模块架构细节、v0.x 设计哲学、HiveMind 2.0 复盘) 保存在 [assets/README_v3.1_archive.md](assets/README_v3.1_archive.md)。
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| **CognitiveStarMap** | `cognitive_star_map.py` | 统一星图 — 三元组痕迹 + 共现矩阵 + 语言痕迹 + 词级共现 + 句式标注 |
+| **ActiveInferenceEngine** | `active_inference.py` | 主动推理 — Beta 信念 + free_energy + choose_action + plan_actions |
+| **ActiveLearner** | `active_learner.py` | 信息获取 — KG→星图→搜索→用户 四层查询 + 广谱三元组提取 |
+| **OfflineLearner** | `offline_learner.py` | 离线学习 — 状态感知自我唤醒 + BudgetContest 竞标 |
+| **DreamModule** | `dream_module.py` | 假说生成 — H1-H6 策略池 |
+| **MetaCognition** | `meta_cognition.py` | 仲裁层 — 学习权重的加权投票 |
+| **MetaReasoningLayer** | `meta_reasoning.py` | 元推理 — 预测误差趋势监控 + 框架级反思 |
+| **ReflectionEngine** | `reflection.py` | 反馈闭环 — 捕获纠正信号 + 会话自我评估 |
+| **LanguageGenerator** | `language_generator.py` | 语言涌现 — 语料库学句式骨架 + 语气内容解耦 |
+| **MotherController** | `mother_controller.py` | 主循环 — Semantic→Pragmatic→AI→MetaCognition→生成 |
+| **CognitiveInterface** | `cognitive_interface.py` | 感官层 — 语言原语→结构假说→语用意图 |
+
+## 快速开始
+
+```bash
+pip install ddgs
+cd src
+python asteriamind_web.py
+# 浏览器打开 http://localhost:8866
+```
+
+**交互方式**: 教她事实 (猫是哺乳动物) / 问她问题 (企鹅是鸟类吗) / 纠正她 (不对，企鹅不是哺乳动物) / 她会自动搜索不确定的知识
+
+**API 端点**: `POST /api/talk` (对话) | `GET /api/reflect` (自我评估 + 权重) | `GET /api/health` (系统健康)
+
+## 模块定位表
+
+| 模块 | 位置 | 一句话 |
+|------|------|--------|
+| CognitiveStarMap | 世界模型/认知空间 | 知识如何存储和关联 |
+| MetaCognition | 仲裁 | 谁说得对听谁的，且从历史中学习该听谁的 |
+| ActiveInference | 决定学什么 | "这条边不确定性 0.8，该验证了" |
+| BudgetContest | 注意力分配 | 8 件事想学，先学收益最高的 2 件 |
+| ActiveLearner | 获取信息 | KG没→星图没→搜网络→问用户 |
+| MemoryConsolidation | 整理已知 | "猫和狗都是哺乳动物→提取模式" |
+| DreamModule | 探索未知 | "企鹅迁徙关系为空，推测与海豹相似" |
+| MetaReasoning | 反思框架 | "我怎么总是在鸟类分类上出错？" |
+| ReflectionEngine | 反馈闭环 | "上一轮被纠正了，semantic 降权" |
+| LanguageGenerator | 怎么说 | 从语料库学句式骨架，不是拼模板 |
 
 *一路走来，每一步都算数。*
 
