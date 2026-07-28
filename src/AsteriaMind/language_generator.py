@@ -30,8 +30,10 @@ class LanguageGenerator:
         """
         从结构化认知输出生成自然语言。
 
-        核心逻辑: 查语料库 → 有足够的统计 → 用统计驱动生成
-                                → 不足 → 回退模板
+        优先级:
+          1. language_traces 原始语料 (真实句子 → 学语气和词序)
+          2. lang_patterns 统计抽象 (频率统计 → 学常见表达)
+          3. 模板回退
         """
         action = cognitive_output.get("action", "unknown")
         subj = cognitive_output.get("subject", "")
@@ -44,16 +46,21 @@ class LanguageGenerator:
 
         bucket = self._confidence_bucket(conf)
 
-        # ── 尝试语料库驱动 ──
+        # ── 1. language_traces 原始语料: 从真实句子里学表达 ──
         if self.star_map:
+            lt = self._query_language_traces(action, pred, bucket)
+            if lt and len(lt.get("sentences", [])) >= 2:
+                return self._generate_from_traces(
+                    lt, subj, pred, obj, evidence, diffs, conf)
+
+            # ── 2. lang_patterns 统计抽象 ──
             patterns = self.star_map.query_expression_patterns(
                 action, bucket, source, min_count=2, top_k=5)
             if patterns and len(patterns) >= 2:
-                # 语料库足够 → 统计驱动
                 return self._generate_from_corpus(
                     patterns, subj, pred, obj, evidence, diffs, conf, action)
 
-        # ── 回退模板 ──
+        # ── 3. 模板回退 ──
         return self._fallback_template(
             action, subj, pred, obj, conf, evidence, diffs, source)
 
@@ -86,7 +93,173 @@ class LanguageGenerator:
         ctx = f"{action}-{bucket}"
         self._feed_word_cooccur(opener, body, closer, subj, pred, obj, ctx)
 
-    # ── 语料库驱动生成 ──
+    # ── language_traces 原始语料查询 ──
+
+    def _infer_pattern_types(self, action: str, pred: str) -> list[str]:
+        """根据行动类型和谓词推断可能的语言模式"""
+        patterns = []
+        if action == "fact_learn":
+            patterns = ["X是Y", "X会Y", "X属于Y", "陈述"]
+        elif action == "info_request":
+            # 回答时: 优先答句模式, 非问句
+            patterns = ["陈述", "X是Y", "X会Y"]
+            if pred == "IS_A":
+                patterns = ["X是Y", "陈述", "X属于Y"]
+            elif pred == "CAN":
+                patterns = ["X会Y", "陈述"]
+            elif pred in ("HAS", "BELONGS_TO"):
+                patterns = ["X属于Y", "X是Y", "陈述"]
+        elif action == "self_directed":
+            patterns = ["陈述"]
+        else:
+            patterns = ["陈述", "X是Y"]
+        return patterns
+
+    def _query_language_traces(self, action: str, pred: str,
+                                confidence_bucket: str) -> dict:
+        """
+        从 language_traces 原始语料中查询相似句子。
+
+        不是查统计表——是查人类真实说过的句子。
+        返回 {sentences: [...], top_openers: [...], top_closers: [...]}
+        """
+        if not self.star_map:
+            return {}
+
+        patterns = self._infer_pattern_types(action, pred)
+        if not patterns:
+            return {}
+
+        # 找与当前场景句型相同的句子
+        placeholders = ",".join("?" * len(patterns))
+        rows = self.star_map.conn.execute(
+            f"SELECT sentence, subj, pred, obj, pattern_type FROM language_traces "
+            f"WHERE pattern_type IN ({placeholders}) "
+            f"ORDER BY timestamp DESC LIMIT 30",
+            patterns
+        ).fetchall()
+
+        if len(rows) < 2:
+            return {}
+
+        # 拆解每个句子 → 收集 opener 和 closer
+        from collections import Counter
+        openers = []
+        closers = []
+        sentences = []
+
+        for row in rows:
+            sentence = row[0]
+            opener, _, closer = self._decompose_reply(sentence)
+            if opener:
+                openers.append(opener)
+            if closer:
+                closers.append(closer)
+            sentences.append({
+                "sentence": sentence,
+                "subj": row[1], "pred": row[2], "obj": row[3],
+                "pattern_type": row[4],
+            })
+
+        return {
+            "sentences": sentences,
+            "top_openers": Counter(openers).most_common(6),
+            "top_closers": Counter(closers).most_common(4),
+            "total": len(rows),
+        }
+
+    def _generate_from_traces(self, lt: dict, subj: str, pred: str, obj: str,
+                               evidence: list, diffs: list, conf: float) -> str:
+        """
+        从原始语料的真实句子中生成回复。
+
+        不是直接用原句子——是提取语气骨架 + 替换实体。
+        """
+        import random
+
+        openers = lt.get("top_openers", [])
+        closers = lt.get("top_closers", [])
+
+        if not openers:
+            return self._fallback_template(
+                "info_request", subj, pred, obj, conf, evidence, diffs, "")
+
+        # 加权随机选 opener 和 closer
+        total_w = sum(c for _, c in openers) or 1
+        r = random.random() * total_w
+        cumulative = 0
+        chosen_opener = openers[0][0]
+        for op, count in openers:
+            cumulative += count
+            if r <= cumulative:
+                chosen_opener = op
+                break
+
+        # ── 提取语气标记: "对的，企鹅是鸟类" → "对的，" ──
+        opener_marker = self._extract_opener_marker(chosen_opener)
+
+        # ── 找最匹配的句子骨架 ──
+        best_sentence = None
+        for s in lt.get("sentences", []):
+            sentence = s.get("sentence", "")
+            if sentence.rstrip().endswith(('吗', '呢', '吧', '？', '?')):
+                continue
+            if s.get("subj") and s.get("pred") == pred:
+                best_sentence = s
+                break
+        if not best_sentence:
+            for s in lt.get("sentences", []):
+                if not s.get("sentence","").rstrip().endswith(('吗','呢','吧','？','?')):
+                    best_sentence = s
+                    break
+        if not best_sentence:
+            best_sentence = lt["sentences"][0] if lt["sentences"] else None
+
+        # ── 构建 body: 语气标记 + 实体 ──
+        if evidence:
+            ev_text = "「" + evidence[0] + "」"
+            if len(evidence) > 1:
+                ev_text += " 和 「" + evidence[1] + "」"
+            body = ev_text
+        else:
+            body = f"{subj} {pred} {obj}"
+
+        # ── 构建 closer: 语料库的自然结尾 ──
+        chosen_closer = closers[0][0] if closers else ""
+        chosen_closer = chosen_closer.replace("{conf}", f"{conf:.0%}")
+
+        return f"{opener_marker}{body}{chosen_closer}"
+
+    def _extract_opener_marker(self, opener: str) -> str:
+        """
+        从语料句子开头提取纯语气标记。
+
+        "对的，企鹅是鸟类" → "对的，"
+        "嗯，猫确实属于哺乳动物" → "嗯，"
+        "没错，海豚是一种哺乳动物" → "没错，"
+        "✅ 学到了: 猫 IS_A 哺乳动物" → "✅ 学到了: "
+        """
+        # 已知的语气标记模式
+        markers = [
+            r'^对的[，,]\s*',
+            r'^不对[，,]\s*',
+            r'^嗯[，,]\s*',
+            r'^没错[，,]\s*',
+            r'^是的[，,]\s*',
+            r'^对[，,]\s*',
+            r'^所以[，,]\s*',
+            r'^那[，,]\s*',
+            r'^应该对[，,——\s]*',
+            r'^好[的][，,]\s*',
+            r'^✅\s*学到了[：:]\s*',
+            r'^我刚查了一下[——\s]*',
+        ]
+        for pat in markers:
+            m = re.match(pat, opener)
+            if m:
+                return m.group(0)
+        # 没有匹配到已知标记: 返回前几个字
+        return opener[:min(6, len(opener))]
 
     def _generate_from_corpus(self, patterns: list[dict],
                                subj: str, pred: str, obj: str,
