@@ -59,51 +59,36 @@ class LanguageGenerator:
         activation = cognitive_output.get("activation")
 
         if focus == "activation_driven" and activation:
+            # ── v3.6: 关系驱动的叙事生成 ──
+            narrative = self._compose_narrative(subj, activation, evidence)
+            if narrative:
+                return narrative
+            # 回退: 单节点
             top = activation[0]
             top_node = top["node"]
             top_energy = top["energy"]
-
-            # 自锚 → 自我介绍
             if any(t.startswith("self_anchor") for t in top.get("triggers", [])):
                 return ("我是 AsteriaMind——一个基于认知星图和能量扩散的学习系统。"
                         "你可以教我知识，向我提问，或者让我搜索。")
-
-            # 强胜者 → 聚焦讨论
             if top_energy > 2.0:
-                if evidence:
-                    return f"关于「{top_node}」——{evidence[0][:120]}"
+                if evidence: return f"关于「{top_node}」——{evidence[0][:120]}"
                 return f"我对「{top_node}」有些了解。你想知道哪方面？"
-
-            # 弱激活 → 试探
             return f"「{subj}」让我联想到了「{top_node}」——你是想了解这方面的知识吗？"
 
-        # ── 门控: 基于信息熵的骨架绑定阈值 ──
-        # 不是"hello 看起来像实体吗"——是"hello 在星图中有语义权重吗?"
-        # 节点度为 0 + 无共现 → 信息量太低 → 不应与知识骨架绑定 → 走社交/观察路径
-        bc = self._binding_confidence(subj, pred, obj)
-        if bc < 0.15:
-            return self._fallback_template(
-                action, subj, pred, obj, conf, evidence, diffs, source)
-
-        # ── 1. language_traces 原始语料: 从真实句子里学表达 ──
+        # ── 原有逻辑链 ──
         if self.star_map:
             lt = self._query_language_traces(action, pred, bucket)
             if lt and len(lt.get("sentences", [])) >= 2:
                 result = self._generate_from_traces(
                     lt, subj, pred, obj, evidence, diffs, conf)
-                # 兜底: 骨架生成结果如果还是不像话 (含未替换占位符或太短), 走模板
                 if result and "{subj}" not in result and "{obj}" not in result \
                         and len(result) >= 4:
                     return result
-
-            # ── 2. lang_patterns 统计抽象 ──
             patterns = self.star_map.query_expression_patterns(
                 action, bucket, source, min_count=2, top_k=5)
             if patterns and len(patterns) >= 2:
                 return self._generate_from_corpus(
                     patterns, subj, pred, obj, evidence, diffs, conf, action)
-
-        # ── 3. 模板回退 ──
         return self._fallback_template(
             action, subj, pred, obj, conf, evidence, diffs, source)
 
@@ -252,6 +237,72 @@ class LanguageGenerator:
             "top_closers": Counter(closers).most_common(4),
             "total": len(rows),
         }
+
+    # ── v3.6: 关系驱动的叙事生成 ──
+    def _compose_narrative(self, subj: str, activation: list[dict],
+                            evidence: list) -> str | None:
+        """
+        从激活节点和它们的关系类型编织自然句子。
+
+        IS_A+CAN+HAS → "企鹅属于鸟类，虽然不会飞，但能游泳，具有羽毛和卵生的特征。"
+        ORBITS+IS_A  → "月球围绕地球旋转，属于卫星。"
+        """
+        if not self.star_map or not subj or len(activation) < 2:
+            return None
+
+        # 从激活的触发标记回推真正的主语
+        real_subj = subj
+        for a in activation:
+            for t in a.get("triggers", []):
+                t_clean = str(t)
+                if t_clean == real_subj: continue
+                if len(t_clean) < 2: continue
+                # 跳过扩散标记: "鸟类(h1)", "蛇→"
+                if any(m in t_clean for m in ("(", "→", "hop")):
+                    continue
+                real_subj = t_clean
+                break
+            if real_subj != subj:
+                break
+
+        relations: dict[str, list[str]] = {}
+        for a in activation[:5]:
+            node = a["node"]
+            if node == real_subj: continue
+            for row in self.star_map.conn.execute(
+                "SELECT relation FROM directed_edges WHERE source=? AND target=? LIMIT 1",
+                (real_subj, node)):
+                if row[0]: relations.setdefault(row[0], []).append(node)
+                break
+
+        if len(relations) < 2:
+            return None
+
+        clauses = []
+        # IS_A
+        if "IS_A" in relations:
+            clauses.append(f"{real_subj}属于" + "、".join(relations["IS_A"][:3]))
+        # 否定
+        negs = []
+        for rel in ("NOT_CAN", "NOT_IS_A"):
+            if rel in relations:
+                negs.extend([f"{'不会' if 'CAN' in rel else '不是'}{t}" for t in relations[rel][:2]])
+        if negs: clauses.insert(0, "虽然" + "、".join(negs))
+        # CAN
+        if "CAN" in relations:
+            s = "，但能" if negs else "能"
+            clauses.append(f"{s}" + "、".join(relations["CAN"][:3]))
+        # HAS
+        if "HAS" in relations:
+            clauses.append("具有" + "、".join(relations["HAS"][:3]) + "的特征")
+        # ORBITS
+        if "ORBITS" in relations:
+            clauses.append("围绕" + "、".join(relations["ORBITS"][:2]) + "旋转")
+
+        if len(clauses) < 2: return None
+        narrative = "。".join(clauses) + "。"
+        if evidence: narrative += " 已确认「" + evidence[0][:80] + "」。"
+        return narrative
 
     def _generate_from_traces(self, lt: dict, subj: str, pred: str, obj: str,
                                evidence: list, diffs: list, conf: float) -> str:
