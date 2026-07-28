@@ -109,6 +109,8 @@ class OfflineLearner:
                 self.total_learned += 1
             else:
                 result["skipped"] += 1
+                # ★ v3.5: 内省写入 — 学不到的把假说存为 HYPOTHESIS 边
+                self._store_hypothesis(winner)
 
         self.total_runs += 1
         self.last_run = time.time()
@@ -142,13 +144,40 @@ class OfflineLearner:
         result = self.active_learner.learn_relation(subj, pred, obj)
 
         if result.get("learned"):
-            # 存入星图已在 learn_relation 里完成
-            # 更新 belief
             if self.active_inference:
                 self.active_inference.update_from_feedback(subj, pred, obj, True)
             return True
 
         return False
+
+    def _store_hypothesis(self, proposal: ExplorationProposal):
+        """
+        v3.5: 内省写入 — 学不到的假说不丢弃，存为 HYPOTHESIS 边。
+
+        低置信度 (0.2-0.3), 标记为 hypothesis 而非 confirmed。
+        下次用户问到相关概念时，可以唤起说 "我有一个推测..."
+        """
+        if not self.star_map:
+            return
+        parts = proposal.query.split()
+        subj = parts[0] if parts else ""
+        pred = parts[1] if len(parts) > 1 else "IS_A"
+        obj = parts[2] if len(parts) > 2 else ""
+        if not subj or not pred or not obj:
+            return
+
+        # 检查是否已经存在 (不管是 confirmed 还是 hypothesis)
+        existing = self.star_map.conn.execute(
+            "SELECT id FROM cognitive_traces WHERE subj=? AND pred=? AND obj=?",
+            (subj, pred, obj)).fetchone()
+        if existing:
+            return
+
+        # 存为 tentative hypothesis
+        self.star_map.store(
+            subj, pred, obj, "hypothesis",
+            f"内省假说: {proposal.hypothesis if hasattr(proposal, 'hypothesis') else '梦境推导'}"
+        )
 
     def _find_orphan_entities(self, top_k=5) -> list[tuple[str, int]]:
         """找孤立实体: 在认知痕迹中出现但边很少的"""
