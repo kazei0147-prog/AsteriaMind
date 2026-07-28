@@ -163,26 +163,26 @@ class MotherController:
         obj = struct.get("object", "") or ""
         prag_type = prag.get("type", "unknown") if isinstance(prag, dict) else getattr(prag, "type", "unknown")
 
-        # ── 0.5. Spreading Activation: 能量驱动的认知焦点 ★ v3.5 ★ ──
-        # 不做 WHERE subj=? 精确查询。把文本所有 n-gram 丢进共现网,
-        # 让能量扩散来告诉系统"哪些节点被点亮了"。
-        cognitive_focus = "regex"  # 默认来源
+        # ── 0.5. Graph Attention: 按问题给边打分 ★ v3.6 ★ ──
+        cognitive_focus = "regex"
+        activation = None
+        salient_edges = None
         if self.star_map and text:
-            activation = self.star_map.spread_activate(text, top_k=5)
-            # 过滤: 跳过谓词标签和功能字
-            _skip_nodes = {"IS_A", "CAN", "BELONGS_TO", "NOT_IS_A",
-                          "CAUSES", "ORBITS", "HAS", "IS_TOPIC", "UNPARSED"}
-            for a in activation:
-                if a["node"] not in _skip_nodes and a["energy"] > 0.3 \
-                        and len(a["node"]) >= 2:
-                    if a["node"] != subj:
-                        cognitive_focus = "activation_driven"
-                        if subj and subj not in _skip_nodes:
-                            obj = subj
-                        subj = a["node"]
-                    break  # 取第一个合法节点
-        else:
-            activation = None
+            # 查图注意力: 不是找能量最高的节点，是找问题最关心的边
+            salient_edges = self.star_map.query_edges(subj, text, top_k=5)
+            if salient_edges and salient_edges[0]["salience"] > 0.2:
+                cognitive_focus = "attention_driven"
+                top = salient_edges[0]
+                if top["target"] != subj:
+                    obj = subj
+                    subj = top["target"]
+                # 附带头部几条显著边供叙事使用
+                activation = [{
+                    "node": e["target"],
+                    "energy": e["salience"],
+                    "triggers": [e.get("relation", "")],
+                    "degree": 0,
+                } for e in salient_edges[:5]]
 
         # ── 1. ActiveInference: 查询信念 ���─
         belief = None

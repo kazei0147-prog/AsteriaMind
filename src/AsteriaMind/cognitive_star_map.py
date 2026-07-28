@@ -477,6 +477,79 @@ class CognitiveStarMap:
             (rel_a, rel_b, connector))
         self.conn.commit()
 
+    # ═══════════════════════════════════════
+    #  v3.6: Graph Attention — 按问题给边打分
+    # ═══════════════════════════════════════
+
+    def query_edges(self, subj: str, query: str, top_k: int = 8) -> list[dict]:
+        """
+        图上注意力——不是找能量最高的节点，而是找"当前问题最关心"的边。
+
+        Score(e) = Energy × Confidence × Relevance × RelationPriority
+
+        问"企鹅会飞吗":
+          IS_A→鸟类: E=0.95, R=0.1 → 0.10  ← 不重要
+          NOT_CAN→飞: E=0.70, R=1.0 → 0.70  ← 主角！
+
+        返回: [{target, relation, energy, salience, confidence}, ...]
+        """
+        from collections import defaultdict
+
+        # 查询词提取
+        query_words = set(re.findall(r'[\u4e00-\u9fff]{1,4}', query))
+        query_words.discard('吗'); query_words.discard('呢'); query_words.discard('什么')
+
+        # 关系类型优先级: 否定/例外 > 能力 > 分类 > 特征
+        relation_priority = {
+            "NOT_CAN": 1.5, "NOT_IS_A": 1.5,
+            "CAN": 1.2, "HAS": 1.0, "ORBITS": 1.0,
+            "IS_A": 0.7, "co_text": 0.3,
+        }
+
+        scored = []
+        for row in self.conn.execute(
+            "SELECT target, relation, weight, confidence, "
+            "COALESCE(energy, 1.0) FROM directed_edges WHERE source=?",
+            (subj,)):
+            target, rel, weight, conf, edge_energy = row
+
+            # ── Relevance: 目标和查询词的重叠度 ──
+            overlap = 0
+            for qw in query_words:
+                if qw in target:
+                    overlap += len(qw) / max(len(target), 1)
+            # 查询词也匹配关系名
+            for qw in query_words:
+                if rel and qw in rel.replace("NOT_", "").replace("IS_", ""):
+                    overlap += 0.5
+            relevance = min(1.0, overlap * 2.0 + 0.2)  # 0.2 基线
+
+            # ── 有效权重 ──
+            eff_w = _effective_weight((weight, conf, time.time() - 1))
+
+            # ── 关系优先级 ──
+            rel_pri = relation_priority.get(rel, 0.5)
+
+            # ── 综合打分 ──
+            salience = eff_w * edge_energy * relevance * rel_pri
+            scored.append({
+                "target": target,
+                "relation": rel,
+                "energy": round(edge_energy, 3),
+                "salience": round(salience, 3),
+                "confidence": conf,
+            })
+
+        # 排序并去重 (同目标保留最高分)
+        scored.sort(key=lambda x: -x["salience"])
+        seen = set()
+        result = []
+        for e in scored:
+            if e["target"] not in seen:
+                seen.add(e["target"])
+                result.append(e)
+        return result[:top_k]
+
     def store(self, subj: str, pred: str, obj: str,
               feedback: str = "confirmed", text: str = "") -> int:
         """存入认知痕迹 + 语言痕迹 + 更新共现"""
