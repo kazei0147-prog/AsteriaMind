@@ -328,6 +328,20 @@ class CognitiveStarMap:
             cols = {r[1] for r in c.execute("PRAGMA table_info(directed_edges)")}
             if "energy" not in cols:
                 c.execute("ALTER TABLE directed_edges ADD COLUMN energy REAL DEFAULT 1.0")
+        # v3.6: 连接词学习表 (语言痕迹)
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='relation_connectors'")
+        if not c.fetchone():
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS relation_connectors (
+                    rel_a TEXT NOT NULL, rel_b TEXT NOT NULL,
+                    connector TEXT NOT NULL, count INTEGER DEFAULT 1,
+                    PRIMARY KEY (rel_a, rel_b, connector)
+                )
+            """)
+            for seed in (("IS_A","NOT_CAN","虽然属于，但不会"), ("IS_A","CAN","属于，能"),
+                         ("NOT_CAN","CAN","虽然不会，但能"), ("HAS","CAN","具有，能"),
+                         ("IS_A","ORBITS","属于，围绕"), ("HAS","IS_A","具有特征，属于")):
+                c.execute("INSERT OR IGNORE INTO relation_connectors(rel_a,rel_b,connector,count) VALUES(?,?,?,1)", seed)
         self.conn.commit()
 
     def _init_energy(self):
@@ -446,6 +460,22 @@ class CognitiveStarMap:
                             "similarity": sim})
         res.sort(key=lambda x: x["similarity"], reverse=True)
         return res
+
+    def relation_connector(self, rel_a: str, rel_b: str) -> str:
+        """语言痕迹: 两个关系类型之间的自然连接词 (虽然...但是...)"""
+        for rels in ((rel_a, rel_b), (rel_b, rel_a)):
+            row = self.conn.execute(
+                "SELECT connector FROM relation_connectors WHERE rel_a=? AND rel_b=? "
+                "ORDER BY count DESC LIMIT 1", rels).fetchone()
+            if row: return row[0]
+        return "。且"
+
+    def learn_connector(self, rel_a: str, rel_b: str, connector: str):
+        self.conn.execute(
+            "INSERT INTO relation_connectors(rel_a,rel_b,connector,count) VALUES(?,?,?,1) "
+            "ON CONFLICT(rel_a,rel_b,connector) DO UPDATE SET count=count+1",
+            (rel_a, rel_b, connector))
+        self.conn.commit()
 
     def store(self, subj: str, pred: str, obj: str,
               feedback: str = "confirmed", text: str = "") -> int:
@@ -621,6 +651,16 @@ class CognitiveStarMap:
 
         if not activation:
             return []
+
+        # ── v3.6: Salience — 查询词注意力增强 ──
+        # 问 "飞" → "飞行" 节点发光 ×3, "不会飞" ×2
+        query_words = set(re.findall(r'[\u4e00-\u9fff]{1,4}', text))
+        query_words.discard('吗'); query_words.discard('呢'); query_words.discard('什么')
+        for node in list(activation.keys()):
+            for qw in query_words:
+                if qw in node:
+                    activation[node] *= 2.5  # 查询词匹配 → 显著增强
+                    break
 
         # ── WTA: 胜者通吃 + 侧向抑制 ──
         sorted_items = sorted(activation.items(), key=lambda x: -x[1])

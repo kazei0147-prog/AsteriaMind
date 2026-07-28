@@ -300,7 +300,18 @@ class LanguageGenerator:
             clauses.append("围绕" + "、".join(relations["ORBITS"][:2]) + "旋转")
 
         if len(clauses) < 2: return None
-        narrative = "。".join(clauses) + "。"
+
+        # ── 用学来的连接词组合从句 (语言痕迹) ──
+        rel_keys = [k for k in relations.keys() if k in ("IS_A","CAN","NOT_CAN","HAS","ORBITS","NOT_IS_A")]
+        narrative = clauses[0]
+        for i in range(1, len(clauses)):
+            rel_a = rel_keys[i-1] if i-1 < len(rel_keys) else ""
+            rel_b = rel_keys[i] if i < len(rel_keys) else ""
+            conn = self.star_map.relation_connector(rel_a, rel_b) if self.star_map else "，"
+            # 连接词本身已有过渡词汇（"属于，能"），直接接从句
+            narrative += f"，{conn}{clauses[i]}" if conn != "。" else f"。{clauses[i]}"
+
+        narrative += "。"
         if evidence: narrative += " 已确认「" + evidence[0][:80] + "」。"
         return narrative
 
