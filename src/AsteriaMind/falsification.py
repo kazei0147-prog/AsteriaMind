@@ -264,7 +264,7 @@ _DDGS_INSTANCE = None
 def _default_web_search(query: str, max_results: int = 5) -> list[WebResult]:
     """
     用 DuckDuckGo 做真实搜索 (无需 API 密钥)。
-    动态 import: 包不可用时优雅降级到占位符。
+    使用 ddgs 包 (duckduckgo_search 已改名为此)。
     DDGS 实例复用 + 失败重试, 避免密集调用时被限流。
     """
     global _DDGS_INSTANCE
@@ -272,7 +272,7 @@ def _default_web_search(query: str, max_results: int = 5) -> list[WebResult]:
         import warnings
         warnings.filterwarnings('ignore')
         if _DDGS_INSTANCE is None:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
             _DDGS_INSTANCE = DDGS()
 
         raw = []
@@ -296,8 +296,8 @@ def _default_web_search(query: str, max_results: int = 5) -> list[WebResult]:
     except ImportError:
         return [WebResult(
             query=query, url=f"(search://{query})",
-            title=f"[需安装 duckduckgo-search] {query}",
-            snippet="pip install duckduckgo-search 后可启用真实搜索。",
+            title=f"[需安装 ddgs] {query}",
+            snippet="pip install ddgs 后可启用真实 DuckDuckGo 搜索。",
             source_credibility=0.0,
         )]
     except Exception as e:
