@@ -268,10 +268,100 @@ class ActiveLearner:
 
     def _extract_facts(self, subj: str, pred: str, obj: str,
                        snippet: str) -> list[dict]:
-        """从搜索结果 snippet 中提取结构化知识"""
+        """
+        从搜索结果 snippet 中提取结构化知识。
+
+        v3.4: 广谱学习 — 不按查询相关性过滤, 接受所有结构合法的三元组。
+              垃圾过滤靠实体质量而非相关性。
+        """
         facts = []
-        skip_s = ('这', '那', '它', '他', '她', '我', '你', '什么', '一个', '我们', '你们', '不', '是', '但')
-        skip_o = ('什么', '怎么', '为什么', '这样', '那样', '一个')
+
+        # ── 扩展停用词: 只过滤真正的代词/连词/副词碎片 ──
+        _skip_s = {
+            # 代词
+            '这', '那', '它', '他', '她', '我', '你',
+            '它们', '他们', '她们', '我们', '你们',
+            '这些', '那些', '什么', '谁', '哪', '其',
+            # 连词/副词 (正则碎片常见)
+            '但', '而', '就', '都', '也', '还', '可', '很', '不', '是',
+            '所以', '因为', '即便', '即使', '当然', '可能', '毫无疑问', '其实',
+            '这就', '那就', '却是', '便是',
+            # 断句残片
+            '期', '前', '后', '的',
+        }
+        _skip_o = {
+            '什么', '怎么', '为什么', '这样', '那样', '一个', '吗', '呢', '哪',
+        }
+
+        # ── 实体质量检查 ──
+        def _clean_entity(e: str) -> str:
+            """清洗实体: 去前导数字和标点"""
+            return re.sub(r'^[\d\s\W_]+', '', e).strip()
+
+        def _valid_subject(s: str) -> bool:
+            """主体是否像一个真正的实体? 排除代词/连词/碎片"""
+            s = _clean_entity(s)
+            if not s or len(s) < 2:
+                return False
+            if s in _skip_s:
+                return False
+            # 必须包含至少一个中文
+            if not any('\u4e00' <= c <= '\u9fff' for c in s):
+                return False
+            # 不能以常见副词/连词开头
+            _bad_starts = {'就', '都', '也', '还', '可', '很', '但', '而', '不',
+                           '所以', '因为', '即便', '即使', '当然', '可能', '其实',
+                           '期', '主要', '多数', '少数', '其次', '另外', '此外',
+                           '最初', '最早', '最后', '最终', '首先', '然后',
+                           '认为', '或许', '也许', '大概', '大约', '一般',
+                           '以及', '并且', '或者', '还是',
+                           '美称', '言企', '每只', '每个', '一种',
+                           '它的', '他的', '她的', '我的', '你的',
+                           '其是', '则是', '便是', '就是',
+                           '什么', '怎么', '为什么', '如何',
+                           }
+            for bs in sorted(_bad_starts, key=len, reverse=True):
+                if s.startswith(bs):
+                    return False
+            # 不能以常见代词开头
+            if any(s.startswith(p) for p in ('它们', '我们', '你们', '他们', '她们', '自己')):
+                return False
+            # 不能以中文单前缀开头 (搜索片段截断痕迹)
+            if s.startswith('乳') or s.startswith('学'):
+                return False
+            if '的' in s:
+                return False
+            return True
+
+        def _valid_object(o: str) -> bool:
+            """客体是否合法? 排除问句和碎片"""
+            o = _clean_entity(o)
+            if not o or len(o) < 2:
+                return False
+            if o in _skip_o:
+                return False
+            if o.endswith('吗') or o.endswith('呢') or o.endswith('吧') or o.endswith('么'):
+                return False
+            if '什么' in o or '怎么' in o or '为什么' in o:
+                return False
+            # 不能是 "不是X" 或 "没有X" 形式 (否定应该在谓词, 不在客体)
+            if o.startswith('不') or o.startswith('没'):
+                return False
+            return True
+
+        def _valid_object(o: str) -> bool:
+            """客体是否合法? 排除问句和碎片"""
+            o = o.strip()
+            if not o or len(o) < 2:
+                return False
+            if o in _skip_o:
+                return False
+            # 不能是问句
+            if o.endswith('吗') or o.endswith('呢') or o.endswith('吧'):
+                return False
+            if '什么' in o or '怎么' in o or '为什么' in o:
+                return False
+            return True
 
         # 按标点分句
         sentences = re.split(r'[，,。.；;！!？?、\n\r]+', snippet)
@@ -282,47 +372,52 @@ class ActiveLearner:
             if not sent or len(sent) < 2:
                 continue
 
-            # "X不是Y" → NOT_IS_A (先于"是"处理, 避免误匹配)
+            # "X不是Y" → NOT_IS_A (先于"是"处理)
             for m in re.finditer(
-                r'([\u4e00-\u9fff\w]{2,8})不是([\u4e00-\u9fff\w]{1,15})', sent):
-                s, o = m.group(1).strip(), m.group(2).strip()
-                if s not in skip_s:
+                r'([\u4e00-\u9fff\w]{2,8})不是([\u4e00-\u9fff\w]{1,18})', sent):
+                s, o = _clean_entity(m.group(1)), _clean_entity(m.group(2))
+                if _valid_subject(s) and _valid_object(o):
                     facts.append({"subj": s, "pred": "NOT_IS_A", "obj": o})
                     last_subj = s
             # 以 "不是" 开头 → 继承前文主语
             if last_subj and sent.startswith('不是'):
-                m = re.match(r'不是([\u4e00-\u9fff\w]{1,15})', sent)
+                m = re.match(r'不是([\u4e00-\u9fff\w]{1,18})', sent)
                 if m:
-                    facts.append({"subj": last_subj, "pred": "NOT_IS_A",
-                                  "obj": m.group(1).strip()})
+                    o = _clean_entity(m.group(1))
+                    if _valid_object(o):
+                        facts.append({"subj": last_subj, "pred": "NOT_IS_A",
+                                      "obj": o})
 
-            # "X是Y" → IS_A (负向后顾: 排除"不是"里的"是")
+            # "X是Y" → IS_A
             for m in re.finditer(
-                r'([\u4e00-\u9fff\w]{2,8})(?<!不)是([\u4e00-\u9fff\w]{1,15})', sent):
-                s, o = m.group(1).strip(), m.group(2).strip()
-                if s in skip_s or o in skip_o:
-                    continue
-                if '不' in s or '但' in s:
-                    continue
-                facts.append({"subj": s, "pred": "IS_A", "obj": o})
-                last_subj = s
+                r'([\u4e00-\u9fff\w]{2,8})(?<!不)是([\u4e00-\u9fff\w]{1,18})', sent):
+                s, o = _clean_entity(m.group(1)), _clean_entity(m.group(2))
+                if _valid_subject(s) and _valid_object(o):
+                    facts.append({"subj": s, "pred": "IS_A", "obj": o})
+                    last_subj = s
 
             # "X属于Y" → BELONGS_TO
             for m in re.finditer(
-                r'([\u4e00-\u9fff\w]{2,8})属于([\u4e00-\u9fff\w]{1,15})', sent):
-                s, o = m.group(1).strip(), m.group(2).strip()
-                if s in skip_s:
-                    continue
-                facts.append({"subj": s, "pred": "BELONGS_TO", "obj": o})
-                last_subj = s
+                r'([\u4e00-\u9fff\w]{2,8})属于([\u4e00-\u9fff\w]{1,18})', sent):
+                s, o = _clean_entity(m.group(1)), _clean_entity(m.group(2))
+                if _valid_subject(s) and _valid_object(o):
+                    facts.append({"subj": s, "pred": "BELONGS_TO", "obj": o})
+                    last_subj = s
 
-            # "X会Y" / "X能Y" → CAN (负向后顾: 排除"不会"里的"会")
+            # "X会Y" / "X能Y" / "X可以Y" → CAN
             for m in re.finditer(
-                r'([\u4e00-\u9fff\w]{2,8})(?<!不)(?:会|能|可以)([\u4e00-\u9fff\w]{1,15})', sent):
-                s, o = m.group(1).strip(), m.group(2).strip()
-                if s in skip_s or '不' in s or '但' in s:
-                    continue
-                facts.append({"subj": s, "pred": "CAN", "obj": o})
-                last_subj = s
+                r'([\u4e00-\u9fff\w]{2,8})(?<!不)(?:会|能|可以)([\u4e00-\u9fff\w]{1,18})', sent):
+                s, o = _clean_entity(m.group(1)), _clean_entity(m.group(2))
+                if _valid_subject(s) and _valid_object(o):
+                    facts.append({"subj": s, "pred": "CAN", "obj": o})
+                    last_subj = s
 
-        return facts
+        # ── 去重: 同一三元组只保留一次 ──
+        seen = set()
+        unique = []
+        for f in facts:
+            key = (f["subj"], f["pred"], f["obj"])
+            if key not in seen:
+                seen.add(key)
+                unique.append(f)
+        return unique
