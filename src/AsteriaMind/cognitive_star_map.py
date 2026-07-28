@@ -342,20 +342,17 @@ class CognitiveStarMap:
                 chunks.append(chunk)
         return chunks
 
-    def spread_activate(self, text: str, top_k: int = 8) -> list[dict]:
+    def spread_activate(self, text: str, top_k: int = 8,
+                          gamma: float = 0.3) -> list[dict]:
         """
-        能量扩散激活 — AM 的眼睛。
+        能量扩散激活 + 胜者通吃 (WTA) + 侧向抑制。
 
-        不做实体识别。不做正则。不做 SQL WHERE subj=?。
-        不做 LIKE。
-
-        把文本的所有 n-gram 片段精确匹配到共现网:
-          Layer 0: 直接命中的节点 → 激活其邻居
-          Layer 1: 高能节点 → 向邻居扩散 (能量 × 0.5)
-          Layer 2: 高能节点 → 再扩散 (能量 × 0.25)
+        v3.5 final:
+          γ=0.3 steep decay — 防止远跳噪声污染焦点
+          WTA — 最高能节点独占，次要节点能量 ×0.3 抑制
+          自锚节点 — "你/AI" 类词触发自我概念锚定
 
         只有网络本身存在的连接才能传导能量。
-        没有连接 = 零激活 = 语义上不存在。
         """
         from collections import defaultdict
 
@@ -367,24 +364,21 @@ class CognitiveStarMap:
         activated_by: dict[str, set] = defaultdict(set)
 
         # ── Layer 0: 精确共现匹配 ──
-        # 只有共现表中实际存在的实体才能激活
         matched = set()
         for chunk in chunks:
             vec = _entity_vector(self.conn, chunk)
             if not vec:
-                continue  # 该片段在共现网中无连接 → 跳过
+                continue
             matched.add(chunk)
             for node, weight in vec.items():
                 activation[node] += weight
                 activated_by[node].add(chunk)
 
-        # 如果没有一个片段在共现网中有连接 → 零激活
         if not matched:
-            return []
+            # ── 自锚: 零激活时检查自我概念触发 ──
+            return self._anchor_activation(text)
 
-        # ── Layer 1: 单跳扩散 ──
-        # 从 Layer 0 中能量 > 阈值的节点, 向它们的邻居扩散
-        DECAY_1 = 0.5
+        # ── Layer 1: 单跳扩散 (γ=0.3) ──
         layer0_candidates = {
             node for node, energy in activation.items() if energy > 1.0
         }
@@ -392,32 +386,46 @@ class CognitiveStarMap:
             vec = _entity_vector(self.conn, node)
             for neighbor, weight in vec.items():
                 if neighbor not in activation:
-                    activation[neighbor] = weight * DECAY_1
-                    activated_by[neighbor].add(f"{node}(hop1)")
+                    activation[neighbor] = weight * gamma  # steep decay
+                    activated_by[neighbor].add(f"{node}(h1)")
 
-        # ── Layer 2: 双跳扩散 ──
-        # 从新增的高能节点再扩散一次
-        DECAY_2 = 0.25
+        # ── Layer 2: 双跳 (γ²=0.09, 几乎不可见) ──
         layer1_candidates = {
             node for node, energy in activation.items()
-            if energy > 2.0 and node not in layer0_candidates
+            if energy > 3.0 and node not in layer0_candidates
         }
         for node in layer1_candidates:
             vec = _entity_vector(self.conn, node)
             for neighbor, weight in vec.items():
                 if neighbor not in activation:
-                    activation[neighbor] = weight * DECAY_2
-                    activated_by[neighbor].add(f"{node}(hop2)")
+                    activation[neighbor] = weight * gamma * gamma
+                    activated_by[neighbor].add(f"{node}(h2)")
 
-        # ── 抑制超连接节点 (功能词/高频词) ──
+        # ── 过滤谓词标签 ──
+        _skip = {"IS_A", "CAN", "BELONGS_TO", "NOT_IS_A",
+                 "CAUSES", "ORBITS", "HAS", "IS_TOPIC", "UNPARSED"}
         for node in list(activation.keys()):
-            degree = self._node_degree(node)
-            if degree > 50:
-                activation[node] *= 0.3
-            elif degree > 20:
-                activation[node] *= 0.6
+            if node in _skip:
+                del activation[node]
+            else:
+                degree = self._node_degree(node)
+                if degree > 50: activation[node] *= 0.2
+                elif degree > 20: activation[node] *= 0.5
 
-        # ── 排序 ──
+        if not activation:
+            return []
+
+        # ── WTA: 胜者通吃 + 侧向抑制 ──
+        sorted_items = sorted(activation.items(), key=lambda x: -x[1])
+        winner = sorted_items[0]
+        # 冠军能量增强
+        activation[winner[0]] *= 1.5
+        # 其他节点能量抑制
+        for i in range(1, len(sorted_items)):
+            node = sorted_items[i][0]
+            activation[node] *= 0.3
+
+        # 重新排序
         sorted_nodes = sorted(activation.items(), key=lambda x: -x[1])[:top_k]
 
         return [{
@@ -426,6 +434,30 @@ class CognitiveStarMap:
             "triggers": list(activated_by.get(node, set())),
             "degree": self._node_degree(node),
         } for node, energy in sorted_nodes if energy > 0.01]
+
+    def _anchor_activation(self, text: str) -> list[dict]:
+        """
+        自锚节点: 当共现网零激活时，检查输入是否触发自我概念。
+
+        "你是谁" → 激活 [AI, 助手, AsteriaMind]
+        "你叫什么" → 激活 [AI]
+        """
+        # 自我概念锚定词
+        self_markers = {'你', 'AI', '谁', '叫什么', '什么是', '你是谁',
+                        'what', 'are', 'you', 'who'}
+        text_clean = re.sub(r'[^\u4e00-\u9fff\w]', '', text)
+        text_set = set(text_clean)
+
+        if not (text_set & self_markers):
+            return []
+
+        # 自锚节点基底能量
+        anchors = [
+            {"node": "AI", "energy": 0.5, "triggers": ["self_anchor"], "degree": 0},
+            {"node": "助手", "energy": 0.4, "triggers": ["self_anchor"], "degree": 0},
+            {"node": "AsteriaMind", "energy": 0.3, "triggers": ["self_anchor"], "degree": 0},
+        ]
+        return [a for a in anchors if any(m in text_set for m in self_markers)]
 
     def _node_degree(self, entity: str) -> int:
         """节点的总连接度 (cognitive_traces + co_occurrence)"""

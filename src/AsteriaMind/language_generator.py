@@ -51,13 +51,23 @@ class LanguageGenerator:
         activation = cognitive_output.get("activation")
 
         if focus == "activation_driven" and activation:
-            top_nodes = [a["node"] for a in activation[:3]]
-            node_text = "、".join(top_nodes)
-            if evidence:
-                return (f"我的星图中关于「{subj}」激活了这些节点: {node_text}。"
-                        f"「{evidence[0]}」")
-            return (f"「{subj}」在我的认知网里连接着: {node_text}——"
-                    f"你想了解哪个方向？")
+            top = activation[0]
+            top_node = top["node"]
+            top_energy = top["energy"]
+
+            # 自锚 → 自我介绍
+            if any(t.startswith("self_anchor") for t in top.get("triggers", [])):
+                return ("我是 AsteriaMind——一个基于认知星图和能量扩散的学习系统。"
+                        "你可以教我知识，向我提问，或者让我搜索。")
+
+            # 强胜者 → 聚焦讨论
+            if top_energy > 2.0:
+                if evidence:
+                    return f"关于「{top_node}」——{evidence[0][:120]}"
+                return f"我对「{top_node}」有些了解。你想知道哪方面？"
+
+            # 弱激活 → 试探
+            return f"「{subj}」让我联想到了「{top_node}」——你是想了解这方面的知识吗？"
 
         # ── 门控: 基于信息熵的骨架绑定阈值 ──
         # 不是"hello 看起来像实体吗"——是"hello 在星图中有语义权重吗?"
