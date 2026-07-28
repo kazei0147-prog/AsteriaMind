@@ -233,8 +233,26 @@ class SemanticHypothesisEngine:
 
         思考显性化: 每个假说附带 evidence 和 reasoning trace。
         """
+        # ── v3.4: 否定纠正预处理 ──
+        # "不对，猫是哺乳动物" → 去除开头的否定标记, 只解析后面的陈述
+        clean_text = text
+        is_correction = False
+        correction_patterns = [
+            r'^不对[，,]\s*',
+            r'^不是[，,]\s*',
+            r'^错了[，,]\s*',
+            r'^搞错了[，,]\s*',
+            r'^你说错了[，,]\s*',
+        ]
+        for pat in correction_patterns:
+            m = re.match(pat, text)
+            if m:
+                clean_text = text[m.end():].strip()
+                is_correction = True
+                break
+
         hypotheses = []
-        primitives = self._extract_primitives(text)
+        primitives = self._extract_primitives(clean_text)
 
         # 分类
         entities = [p for p in primitives if p.category == "Entity"]

@@ -179,7 +179,8 @@ class MotherController:
             "semantic": {"action": sem_action, "confidence": sem_conf},
             "pragmatic": {"action": prag_type, "confidence": prag.get("confidence", 0.5) if isinstance(prag, dict) else 0.5},
         }
-        if belief:
+        # 只在有实际证据时加入信念信号 (避免零证据 Beta(1,1) 扰乱仲裁)
+        if belief and belief.get("evidence_count", 0) > 0:
             signals["belief"] = {
                 "action": "confirmed" if belief["belief"] > 0.5 else "corrected",
                 "confidence": belief["belief"],
