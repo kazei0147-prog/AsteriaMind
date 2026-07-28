@@ -168,14 +168,19 @@ class MotherController:
         # 让能量扩散来告诉系统"哪些节点被点亮了"。
         cognitive_focus = "regex"  # 默认来源
         if self.star_map and text:
-            activation = self.star_map.spread_activate(text, top_k=3)
-            if activation and activation[0]["energy"] > 0.3:
-                top_node = activation[0]
-                # 能量驱动的焦点 vs 正则提取的实体: 能量高的胜出
-                if top_node["node"] != subj and len(top_node["node"]) >= 2:
-                    cognitive_focus = "activation_driven"
-                    obj = subj  # 旧主语变成可能的客体
-                    subj = top_node["node"]
+            activation = self.star_map.spread_activate(text, top_k=5)
+            # 过滤: 跳过谓词标签和功能字
+            _skip_nodes = {"IS_A", "CAN", "BELONGS_TO", "NOT_IS_A",
+                          "CAUSES", "ORBITS", "HAS", "IS_TOPIC", "UNPARSED"}
+            for a in activation:
+                if a["node"] not in _skip_nodes and a["energy"] > 0.3 \
+                        and len(a["node"]) >= 2:
+                    if a["node"] != subj:
+                        cognitive_focus = "activation_driven"
+                        if subj and subj not in _skip_nodes:
+                            obj = subj
+                        subj = a["node"]
+                    break  # 取第一个合法节点
         else:
             activation = None
 
