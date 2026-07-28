@@ -38,7 +38,21 @@ def _build_cooccur_from_traces(conn: sqlite3.Connection):
             evidence_count INTEGER DEFAULT 1,
             last_update REAL DEFAULT 0,
             PRIMARY KEY (entity_a, entity_b)
-        )
+        );
+
+        -- v3.5: 有向边 — 保留关系的方向和类型
+        CREATE TABLE IF NOT EXISTS directed_edges (
+            source TEXT NOT NULL,
+            target TEXT NOT NULL,
+            relation TEXT DEFAULT '',
+            weight INTEGER DEFAULT 1,
+            confidence REAL DEFAULT 1.0,
+            evidence_count INTEGER DEFAULT 1,
+            last_update REAL DEFAULT 0,
+            PRIMARY KEY (source, target, relation)
+        );
+        CREATE INDEX IF NOT EXISTS idx_de_source ON directed_edges(source);
+        CREATE INDEX IF NOT EXISTS idx_de_target ON directed_edges(target);
     """)
     for row in cur.execute("SELECT subj, pred, obj, feedback FROM cognitive_traces"):
         subj, pred, obj = (row[0] or "").strip(), (row[1] or "").strip(), (row[2] or "").strip()
@@ -46,6 +60,8 @@ def _build_cooccur_from_traces(conn: sqlite3.Connection):
         _incr_cooccur(cur, subj, pred, fb, time.time())
         _incr_cooccur(cur, subj, obj, fb, time.time())
         _incr_cooccur(cur, pred, obj, fb, time.time())
+        # 有向边: 保留三元组方向
+        _incr_directed(cur, subj, obj, pred, fb, time.time())
     conn.commit()
 
 
@@ -71,7 +87,49 @@ def _incr_cooccur(cur, a: str, b: str, feedback: str = "confirmed", ts: float = 
         (a, b, conf_boost, ts, conf_boost, ts))
 
 
-def _effective_weight(row) -> float:
+def _incr_directed(cur, source: str, target: str, relation: str = "",
+                    feedback: str = "confirmed", ts: float = 0):
+    """有向边: source →[relation]→ target, 保留方向和关系类型"""
+    if not source or not target or source == target:
+        return
+    conf_boost = 1.0 if feedback == "confirmed" else (0.3 if feedback == "corrected" else 0.5)
+    ts = ts or time.time()
+    cur.execute(
+        "INSERT INTO directed_edges(source,target,relation,weight,confidence,evidence_count,last_update) "
+        "VALUES(?,?,?,1,?,1,?) "
+        "ON CONFLICT(source,target,relation) DO UPDATE SET "
+        "weight=weight+1, "
+        "confidence=(confidence*evidence_count+?)/(evidence_count+1), "
+        "evidence_count=evidence_count+1, "
+        "last_update=?",
+        (source, target, relation, conf_boost, ts, conf_boost, ts))
+
+
+def _directed_vector(conn, entity: str, direction: str = "out") -> dict[str, float]:
+    """
+    有向向量:
+      direction='out': entity → target 的出边
+      direction='in':  source → entity 的入边
+      direction='both': 出+入
+    """
+    vec = {}
+    if direction in ("out", "both"):
+        for row in conn.execute(
+            "SELECT target, weight, confidence, last_update, relation "
+            "FROM directed_edges WHERE source=? ORDER BY weight DESC", (entity,)):
+            w = _effective_weight(row[:3])
+            if w > 0.01:
+                key = row[3] if row[3] else row[0]
+                vec[key] = max(vec.get(key, 0), w)
+    if direction in ("in", "both"):
+        for row in conn.execute(
+            "SELECT source, weight, confidence, last_update, relation "
+            "FROM directed_edges WHERE target=? ORDER BY weight DESC", (entity,)):
+            w = _effective_weight(row[:3])
+            if w > 0.01:
+                key = row[3] if row[3] else row[0]
+                vec[key] = max(vec.get(key, 0), w * 0.8)  # 入边稍降权
+    return vec
     """动态边权: weight × confidence × time_decay"""
     weight = row[0] if isinstance(row, tuple) else row["weight"]
     conf = row[1] if isinstance(row, tuple) else row["confidence"]
@@ -183,6 +241,24 @@ class CognitiveStarMap:
             cols = {r[1] for r in self.conn.execute("PRAGMA table_info(language_traces)")}
             if "sentence_type" not in cols:
                 c.execute("ALTER TABLE language_traces ADD COLUMN sentence_type TEXT DEFAULT 'unknown'")
+        # v3.5: 自动迁移 — directed_edges 表
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='directed_edges'")
+        if not c.fetchone():
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS directed_edges (
+                    source TEXT NOT NULL, target TEXT NOT NULL, relation TEXT DEFAULT '',
+                    weight INTEGER DEFAULT 1, confidence REAL DEFAULT 1.0,
+                    evidence_count INTEGER DEFAULT 1, last_update REAL DEFAULT 0,
+                    PRIMARY KEY (source, target, relation)
+                )
+            """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_de_source ON directed_edges(source)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_de_target ON directed_edges(target)")
+            # 从现有 cognitive_traces 回填
+            for row in c.execute("SELECT subj, pred, obj, feedback FROM cognitive_traces"):
+                s, p, o = (row[0] or "").strip(), (row[1] or "").strip(), (row[2] or "").strip()
+                if s and o and p:
+                    _incr_directed(c, s, o, p, row[3] or "confirmed", time.time())
         self.conn.commit()
 
     @staticmethod
@@ -294,6 +370,8 @@ class CognitiveStarMap:
         _incr_cooccur(self.conn.cursor(), subj, pred, feedback, ts)
         _incr_cooccur(self.conn.cursor(), subj, obj, feedback, ts)
         _incr_cooccur(self.conn.cursor(), pred, obj, feedback, ts)
+        # 有向边: subj →[pred]→ obj (保留方向和关系类型)
+        _incr_directed(self.conn.cursor(), subj, obj, pred, feedback, ts)
         self.conn.commit()
         return cog_id
 
@@ -363,10 +441,13 @@ class CognitiveStarMap:
         activation: dict[str, float] = defaultdict(float)
         activated_by: dict[str, set] = defaultdict(set)
 
-        # ── Layer 0: 精确共现匹配 ──
+        # ── Layer 0: 精确匹配 (优先有向边) ──
         matched = set()
         for chunk in chunks:
-            vec = _entity_vector(self.conn, chunk)
+            # 优先有向向量: "森蚺" → 出边 [蛇]
+            vec = _directed_vector(self.conn, chunk, "out")
+            if not vec:
+                vec = _entity_vector(self.conn, chunk)  # 回退无向共现
             if not vec:
                 continue
             matched.add(chunk)
@@ -383,7 +464,9 @@ class CognitiveStarMap:
             node for node, energy in activation.items() if energy > 1.0
         }
         for node in layer0_candidates:
-            vec = _entity_vector(self.conn, node)
+            vec = _directed_vector(self.conn, node, "out")
+            if not vec:
+                vec = _entity_vector(self.conn, node)
             for neighbor, weight in vec.items():
                 if neighbor not in activation:
                     activation[neighbor] = weight * gamma  # steep decay
@@ -395,7 +478,9 @@ class CognitiveStarMap:
             if energy > 3.0 and node not in layer0_candidates
         }
         for node in layer1_candidates:
-            vec = _entity_vector(self.conn, node)
+            vec = _directed_vector(self.conn, node, "out")
+            if not vec:
+                vec = _entity_vector(self.conn, node)
             for neighbor, weight in vec.items():
                 if neighbor not in activation:
                     activation[neighbor] = weight * gamma * gamma
@@ -496,6 +581,9 @@ class CognitiveStarMap:
                 a, b = words[i], words[j]
                 if a == b: continue
                 _incr_cooccur(cur, a, b, "confirmed", ts)
+                # 有向边: 同段文本内双向弱连接 (relation=co_text)
+                _incr_directed(cur, a, b, "co_text", "confirmed", ts)
+                _incr_directed(cur, b, a, "co_text", "confirmed", ts)
         self.conn.commit()
 
     def emergent_reply(self, text: str, subj: str, pred: str, obj: str) -> dict:
