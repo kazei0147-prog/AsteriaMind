@@ -366,6 +366,27 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if text.startswith(('learnw ', 'readcn ', 'answer ', '以后我')):
             return self._process_legacy(text)
 
+        # ── v3.5: 联网搜索 — 桥接到 ActiveLearner 学习管道 ──
+        search_query = None
+        for pat in (r'^搜索[：:\s]*(.+)', r'^帮我搜[：:\s]*(.+)', r'^查一下[：:\s]*(.+)',
+                    r'^查查[：:\s]*(.+)', r'^搜一下[：:\s]*(.+)',
+                    r'^search[：:\s]+(.+)', r'^帮我查[：:\s]*(.+)'):
+            m = re.match(pat, text, re.IGNORECASE)
+            if m:
+                search_query = m.group(1).strip()
+                break
+        if search_query and len(search_query) >= 2:
+            result = ci.active_learner.learn_word(search_query)
+            if result.get("known") and result.get("source") in ("web_search", "star_map"):
+                return (f"🔍 搜索「{search_query}」: {result.get('definition', '')[:200]}",
+                        "search_learn", {})
+            elif result.get("pending"):
+                return (f"🔍 关于「{search_query}」我没搜到可靠信息。你能教我吗?",
+                        "search_gap", {})
+            else:
+                return (f"🔍 搜索了「{search_query}」，但需要更多上下文。试试教我?",
+                        "search_uncertain", {})
+
         # 数学: 保留快速路径
         if re.search(r'\d\s*[\+\-\*/\^]\s*\d', text):
             m = skill_lib.best_match(text)
