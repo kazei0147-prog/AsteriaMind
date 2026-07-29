@@ -243,6 +243,25 @@ class WebResult:
 
 
 from urllib.parse import quote, urlencode
+class WebSearchInterface:
+    """真正的网络查询接口。适配 SearXNG / DuckDuckGo / 自定义后端。"""
+
+    def __init__(self, search_fn=None):
+        self.search_fn = search_fn or _default_web_search
+
+    def search(self, query: str, max_results: int = 5) -> list[WebResult]:
+        results = self.search_fn(query, max_results)
+        return results if results else [WebResult(
+            query=query, url=f"(search://{query})",
+            title=f"搜索结果: {query}",
+            snippet=f"搜索未返回结果。",
+            source_credibility=0.0,
+        )]
+
+
+_QUOTE_INSTANCE = None
+
+
 class SearxNGSearch:
     """SearXNG 元搜索引擎 — 无 API 密钥, 自托管/公共实例均可"""
 
