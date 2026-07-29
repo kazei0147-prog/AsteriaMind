@@ -415,9 +415,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if r.get("success"):
                     return (f"🧮 {r.get('result')}", "math", {})
 
-        # ★ v3.6: 新管线优先 — 直接从星图提取主语, 走叙事流程 ★
+        # ★ v3.6: 新管线优先 ★
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
         subj_candidate = ""
+
+        # 打招呼 → 直回
+        if text in ('你好','您好','嗨','在吗','hello','hi'):
+            return ("你好！我是 AsteriaMind——一个基于认知星图和能量扩散的学习系统。"
+                    "你可以问我关于动物、植物、天文的问题，或者教我新知识。", "greeting", {})
+
         if ci.mother.star_map:
             for w in (2, 3):
                 for i in range(len(clean) - w + 1):

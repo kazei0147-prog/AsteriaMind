@@ -277,8 +277,8 @@ class LanguageGenerator:
 
         if not seen: return None
 
-        # ── 按"先否定，再分类，再能力"顺序排列 ──
-        order = {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1, "CAN": 2, "EATS": 3, "HAS": 4, "ORBITS": 5}
+        # ── 按"否定→分类→能力→食性→特征→栖息"固定顺序 ──
+        order = {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1, "CAN": 2, "EATS": 3, "HAS": 4, "ORBITS": 4, "LIVES_IN": 5}
         seen.sort(key=lambda r: order.get(r, 99))
 
         parts = []
