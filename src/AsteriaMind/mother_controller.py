@@ -118,6 +118,7 @@ class MotherController:
         self.meta_cognition = MetaCognition()
         self.meta_reasoning = MetaReasoningLayer()
         self.round_count = 0
+        self._last_salient_edges: list[dict] = []  # v3.6: 反馈闭环用
 
         # v3.4: 语料库驱动的语言生成器
         if lang_gen:
@@ -149,10 +150,17 @@ class MotherController:
 
             # → MetaReasoning: 真实预测误差
             self.meta_reasoning.record_outcome("direct", was_correct, prev_conf)
-
             # → MetaCognition: 调整各模块投票权重
             for mod_name in prev_modules:
                 self.meta_cognition.learn_from_reflection(mod_name, was_correct)
+
+            # ★ v3.6: 能量代谢封闭 — 反馈 → 恢复/衰减边能量 ★
+            if self.star_map and self._last_salient_edges:
+                for e in self._last_salient_edges:
+                    if was_correct:
+                        self.star_map.restore_energy(e["source"], e["target"], 0.05)
+                    else:
+                        self.star_map.consume_energy(e["source"], e["target"], 0.1)
         else:
             was_correct = None
         sem = semantic_result
@@ -172,12 +180,15 @@ class MotherController:
             salient_edges = self.star_map.query_edges(subj, text, top_k=5)
             if salient_edges and salient_edges[0]["salience"] > 0.2:
                 cognitive_focus = "attention_driven"
-                # 不覆盖 subj — 保留原始主语供叙事使用
                 activation = [{
                     "node": e["target"],
                     "energy": e["salience"],
                     "triggers": [e.get("relation", "")],
                     "degree": 0,
+                } for e in salient_edges[:5]]
+                # 存储显著边供反馈闭环
+                self._last_salient_edges = [{
+                    "source": subj, "target": e["target"]
                 } for e in salient_edges[:5]]
 
         # ── 1. ActiveInference: 查询信念 ���─
