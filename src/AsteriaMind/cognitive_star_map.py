@@ -338,9 +338,9 @@ class CognitiveStarMap:
                     PRIMARY KEY (rel_a, rel_b, connector)
                 )
             """)
-            for seed in (("IS_A","NOT_CAN","虽然属于，但不会"), ("IS_A","CAN","属于，能"),
-                         ("NOT_CAN","CAN","虽然不会，但能"), ("HAS","CAN","具有，能"),
-                         ("IS_A","ORBITS","属于，围绕"), ("HAS","IS_A","具有特征，属于")):
+            for seed in (("IS_A","NOT_CAN","虽然属于，但"), ("IS_A","CAN","属于，且"),
+                         ("NOT_CAN","CAN","虽然不会，但"), ("HAS","CAN","且"),
+                         ("IS_A","ORBITS","属于，"), ("HAS","IS_A","也属于")):
                 c.execute("INSERT OR IGNORE INTO relation_connectors(rel_a,rel_b,connector,count) VALUES(?,?,?,1)", seed)
         self.conn.commit()
 
@@ -462,13 +462,38 @@ class CognitiveStarMap:
         return res
 
     def relation_connector(self, rel_a: str, rel_b: str) -> str:
-        """语言痕迹: 两个关系类型之间的自然连接词 (虽然...但是...)"""
         for rels in ((rel_a, rel_b), (rel_b, rel_a)):
             row = self.conn.execute(
                 "SELECT connector FROM relation_connectors WHERE rel_a=? AND rel_b=? "
                 "ORDER BY count DESC LIMIT 1", rels).fetchone()
             if row: return row[0]
-        return "。且"
+        return "，"
+
+    def pattern_connector(self, relation_sequence: list[str]) -> str:
+        """
+        多关系模式的连接词链。
+
+        [NOT_CAN, IS_A, CAN] → 查三次:
+          NOT_CAN+IS_A → "虽然不会飞，但属于"
+          IS_A+CAN     → "属于，能"
+          → 合成: "虽然不会飞，但属于，能"
+        """
+        if len(relation_sequence) < 2:
+            return ""
+        parts = []
+        for i in range(len(relation_sequence) - 1):
+            # 优先查精确多关系匹配
+            pattern = "+".join(relation_sequence[i:i+2])
+            row = self.conn.execute(
+                "SELECT connector FROM relation_connectors WHERE rel_a=? AND rel_b=? "
+                "ORDER BY count DESC LIMIT 1",
+                (pattern, "")).fetchone()
+            if row:
+                parts.append(row[0])
+            else:
+                parts.append(self.relation_connector(
+                    relation_sequence[i], relation_sequence[i+1]))
+        return " | ".join(parts)
 
     def learn_connector(self, rel_a: str, rel_b: str, connector: str):
         self.conn.execute(

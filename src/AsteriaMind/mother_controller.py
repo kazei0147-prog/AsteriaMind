@@ -172,11 +172,7 @@ class MotherController:
             salient_edges = self.star_map.query_edges(subj, text, top_k=5)
             if salient_edges and salient_edges[0]["salience"] > 0.2:
                 cognitive_focus = "attention_driven"
-                top = salient_edges[0]
-                if top["target"] != subj:
-                    obj = subj
-                    subj = top["target"]
-                # 附带头部几条显著边供叙事使用
+                # 不覆盖 subj — 保留原始主语供叙事使用
                 activation = [{
                     "node": e["target"],
                     "energy": e["salience"],

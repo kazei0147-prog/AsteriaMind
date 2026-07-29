@@ -242,62 +242,87 @@ class LanguageGenerator:
     def _compose_narrative(self, subj: str, activation: list[dict],
                             evidence: list) -> str | None:
         """
-        从激活节点和它们的关系类型编织自然句子。
+        v3.6 final: 边 → 关系模式 → 连���词链 → 一句话。
 
-        IS_A+CAN+HAS → "企鹅属于鸟类，虽然不会飞，但能游泳，具有羽毛和卵生的特征。"
-        ORBITS+IS_A  → "月球围绕地球旋转，属于卫星。"
+        不做独立从句拼接。先看所有显著边的类型组合，
+        再找对应的连接词链，然后一次织成句子。
         """
         if not self.star_map or not subj or len(activation) < 2:
             return None
 
-        # 从激活的触发标记回推真正的主语
-        real_subj = subj
-        for a in activation:
-            for t in a.get("triggers", []):
-                t_clean = str(t)
-                if t_clean == real_subj: continue
-                if len(t_clean) < 2: continue
-                # 跳过扩散标记: "鸟类(h1)", "蛇→"
-                if any(m in t_clean for m in ("(", "→", "hop")):
-                    continue
-                real_subj = t_clean
-                break
-            if real_subj != subj:
-                break
-
-        relations: dict[str, list[str]] = {}
+        # ── 收集边 (目标, 关系类型) ──
+        edges: list[tuple[str, str]] = []
         for a in activation[:5]:
             node = a["node"]
-            if node == real_subj: continue
-            for row in self.star_map.conn.execute(
-                "SELECT relation FROM directed_edges WHERE source=? AND target=? LIMIT 1",
-                (real_subj, node)):
-                if row[0]: relations.setdefault(row[0], []).append(node)
-                break
+            for t in a.get("triggers", []):
+                if t and len(t) >= 2 and "(" not in str(t) and "→" not in str(t):
+                    edges.append((node, t))
+                    break
+            else:
+                for row in self.star_map.conn.execute(
+                    "SELECT relation FROM directed_edges WHERE source=? AND target=? LIMIT 1",
+                    (subj, node)):
+                    if row[0]: edges.append((node, row[0])); break
 
-        if len(relations) < 2:
-            return None
+        if len(edges) < 2: return None
 
-        clauses = []
-        # IS_A
-        if "IS_A" in relations:
-            clauses.append(f"{real_subj}属于" + "、".join(relations["IS_A"][:3]))
-        # 否定
-        negs = []
-        for rel in ("NOT_CAN", "NOT_IS_A"):
-            if rel in relations:
-                negs.extend([f"{'不会' if 'CAN' in rel else '不是'}{t}" for t in relations[rel][:2]])
-        if negs: clauses.insert(0, "虽然" + "、".join(negs))
-        # CAN
-        if "CAN" in relations:
-            s = "，但能" if negs else "能"
-            clauses.append(f"{s}" + "、".join(relations["CAN"][:3]))
-        # HAS
-        if "HAS" in relations:
-            clauses.append("具有" + "、".join(relations["HAS"][:3]) + "的特征")
-        # ORBITS
-        if "ORBITS" in relations:
-            clauses.append("围绕" + "、".join(relations["ORBITS"][:2]) + "旋转")
+        # ── 按关系类型分组，保留顺序 ──
+        seen: list[str] = []
+        grouped: dict[str, list[str]] = {}
+        for target, rel in edges:
+            if rel not in grouped:
+                grouped[rel] = []; seen.append(rel)
+            if target not in grouped[rel]:
+                grouped[rel].append(target)
+
+        if len(seen) < 2: return None
+
+        # ── 关系 → 从句模板 ──
+        tmpl = {
+            "NOT_CAN": lambda ts: f"不会{'、'.join(ts)}",
+            "NOT_IS_A": lambda ts: f"不是{'、'.join(ts)}",
+            "IS_A": lambda ts: f"属于{'、'.join(ts)}",
+            "CAN": lambda ts: f"能{'、'.join(ts)}",
+            "HAS": lambda ts: f"有{'、'.join(ts)}",
+            "ORBITS": lambda ts: f"绕{'、'.join(ts)}转",
+        }
+        clauses = [tmpl.get(rel, lambda ts: "、".join(ts))(grouped[rel][:3]) for rel in seen]
+
+        # ── 按"先否定，再分类，再能力"顺序排列 ──
+        order = {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1, "CAN": 2, "HAS": 3, "ORBITS": 4}
+        seen.sort(key=lambda r: order.get(r, 99))
+
+        parts = []
+        for rel in seen:
+            targets = grouped[rel][:3]
+            if rel in ("NOT_CAN", "NOT_IS_A"):
+                parts.append(f"{'不会' if 'CAN' in rel else '不是'}{'、'.join(targets)}")
+            elif rel == "IS_A":
+                parts.append(f"属于{'、'.join(targets)}")
+            elif rel == "CAN":
+                parts.append(f"能{'、'.join(targets)}")
+            elif rel == "HAS":
+                parts.append(f"具有{'、'.join(targets)}")
+            elif rel == "ORBITS":
+                parts.append(f"绕{'、'.join(targets)}转")
+
+        if len(parts) < 2: return None
+
+        # ── 根据首从句类型决定连接结构 ──
+        first_rel = seen[0]
+        if first_rel in ("NOT_CAN", "NOT_IS_A"):
+            # "虽然不会X，但属于Y，能Z"
+            sentence = f"{subj}虽然{parts[0]}"
+            for i in range(1, len(parts)):
+                p = parts[i]
+                connector = "，但" if seen[i] == "IS_A" and i == 1 else "，还"
+                sentence += f"{connector}{p}"
+        else:
+            sentence = f"{subj}{parts[0]}"
+            for p in parts[1:]:
+                sentence += f"，{p}"
+
+        return sentence + "。"
 
         if len(clauses) < 2: return None
 
