@@ -152,10 +152,11 @@ class OfflineLearner:
 
     def _store_hypothesis(self, proposal: ExplorationProposal):
         """
-        v3.5: 内省写入 — 学不到的假说不丢弃，存为 HYPOTHESIS 边。
+        v3.6: 假说质量过滤 — Novelty × Evidence × Confidence, merge dupes
 
-        低置信度 (0.2-0.3), 标记为 hypothesis 而非 confirmed。
-        下次用户问到相关概念时，可以唤起说 "我有一个推测..."
+        Score = Novelty (0-1) × Evidence (0-1) × BaseConfidence - Cost
+        重复已存在 → merge, 不新建。
+        已确认 → 跳过。
         """
         if not self.star_map:
             return
@@ -165,18 +166,47 @@ class OfflineLearner:
         obj = parts[2] if len(parts) > 2 else ""
         if not subj or not pred or not obj:
             return
+        if subj in ("?", "未知", "") or obj in ("?", "未知", ""):
+            return  # 太模糊
 
-        # 检查是否已经存在 (不管是 confirmed 还是 hypothesis)
+        # ── 1. Novelty Check ──
         existing = self.star_map.conn.execute(
-            "SELECT id FROM cognitive_traces WHERE subj=? AND pred=? AND obj=?",
+            "SELECT id, feedback FROM cognitive_traces "
+            "WHERE subj=? AND pred=? AND obj=? LIMIT 1",
             (subj, pred, obj)).fetchone()
+
         if existing:
-            return
+            if existing[1] == "confirmed":
+                return
+            if existing[1] == "hypothesis":
+                # 重复假说 → 仅记录, 不新建 (confidence 非 schema 列)
+                return
+
+        # ── 2. Evidence Check ──
+        # 假说是否有同方向的有向边支撑?
+        evidence = 0.3  # 基线: 梦境本身是弱证据
+        for row in self.star_map.conn.execute(
+            "SELECT COUNT(*) FROM directed_edges WHERE source=? AND target=?",
+            (subj, obj)):
+            if row[0] > 0:
+                evidence += 0.15  # 有向边支撑
+        neg_evidence = self.star_map.conn.execute(
+            "SELECT COUNT(*) FROM directed_edges "
+            "WHERE (source=? AND target=?) AND relation LIKE 'NOT_%'",
+            (subj, obj)).fetchone()[0]
+        if neg_evidence > 0:
+            evidence -= 0.4  # 存在矛盾证据 → 低分
+
+        # ── 3. Quality Score ──
+        cost = 0.1
+        score = 0.5 * evidence * 0.25 - cost  # Novelty×Evidence×Confidence - Cost
+        if score <= 0:
+            return  # 质量太低, 不存
 
         # 存为 tentative hypothesis
         self.star_map.store(
             subj, pred, obj, "hypothesis",
-            f"内省假说: {proposal.hypothesis if hasattr(proposal, 'hypothesis') else '梦境推导'}"
+            f"内省假说(s={score:.2f}): {proposal.hypothesis if hasattr(proposal,'hypothesis') else '梦境推导'}"
         )
 
     def _find_orphan_entities(self, top_k=5) -> list[tuple[str, int]]:

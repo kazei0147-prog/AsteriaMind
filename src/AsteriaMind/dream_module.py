@@ -58,6 +58,28 @@ class DreamModule:
         anomalies = self._dream_anomalies()
         new_hypotheses.extend(anomalies)
 
+        # ── v3.6: 本周期内去重 ──
+        seen = set()
+        deduped = []
+        for h in new_hypotheses:
+            key = f"{h.get('subject','')}:{h.get('predicate','')}:{h.get('object','')}"
+            if key not in seen:
+                seen.add(key)
+                deduped.append(h)
+        new_hypotheses = deduped
+
+        # ── v3.6: 对抗已确认知识 ──
+        # 如果假说与已确认的三元组完全一致 → 跳过
+        filtered = []
+        for h in new_hypotheses:
+            exists = self.star_map.conn.execute(
+                "SELECT id FROM cognitive_traces WHERE subj=? AND pred=? AND obj=? AND feedback='confirmed' LIMIT 1",
+                (h.get("subject",""), h.get("predicate",""), h.get("object",""))
+            ).fetchone()
+            if not exists:
+                filtered.append(h)
+        new_hypotheses = filtered
+
         self.hypothesis_pool.extend(new_hypotheses)
         return new_hypotheses
 
