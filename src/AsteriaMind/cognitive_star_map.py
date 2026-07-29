@@ -815,14 +815,21 @@ class CognitiveStarMap:
 
     def spread_write(self, text: str, energy_boost: float = 1.0):
         """
-        从搜索结果中直接增强共现连接，而不是硬提取三元组。
+        文本 → 词对共现 → co_text 有向边。
 
-        "森蚺...是世上最大的蛇之一，生活在南美洲"
-          → 高频实词: 森蚺、巨型、蛇、南美洲
-          → 两两建强连接 (co_occurrence weight++)
+        重叠 2-3 字滑动窗口，过滤包含功能字的碎片。
         """
-        # 提取高频中文实词 (2-4 字)
-        words = list(set(re.findall(r'[\u4e00-\u9fff]{2,4}', text)))
+        clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
+        # 功能字: 纯语法标记，不是概念
+        func_chars = set('的了一是也在吗呢但而且很就都还要会能有这那它他她们不过与或和所以因为虽然')
+        words = set()
+        for w in (2, 3):
+            for i in range(len(clean) - w + 1):
+                word = clean[i:i + w]
+                if len(word) < 2 or any(c in func_chars for c in word):
+                    continue
+                words.add(word)
+        words = list(words)
         if len(words) < 2:
             return
 
