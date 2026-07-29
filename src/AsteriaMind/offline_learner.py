@@ -242,9 +242,34 @@ class OfflineLearner:
         return accepted / max(generated, 1)
 
     def summary(self) -> dict:
+        # ── 假说验证率 ──
+        vr = 0.0
+        if self.star_map:
+            total = self.star_map.conn.execute(
+                "SELECT COUNT(*) FROM cognitive_traces WHERE feedback IN ('hypothesis','confirmed') "
+                "AND id IN (SELECT id FROM cognitive_traces WHERE feedback='hypothesis')"
+            ).fetchone()[0]
+            confirmed = self.star_map.conn.execute(
+                "SELECT COUNT(*) FROM cognitive_traces WHERE feedback='confirmed' "
+                "AND id IN (SELECT id FROM cognitive_traces WHERE subj IS NOT NULL)"
+            ).fetchone()[0]
+            # 只算从 hypothesis 升级上来的 (带 "内省假说" 标记的)
+            confirmed_from_hyp = self.star_map.conn.execute(
+                "SELECT COUNT(*) FROM cognitive_traces WHERE feedback='confirmed' "
+                "AND (pattern LIKE '%内省假说%' OR pattern LIKE '%梦境推导%')"
+            ).fetchone()[0]
+            hyps = self.star_map.conn.execute(
+                "SELECT COUNT(*) FROM cognitive_traces WHERE feedback IN ('hypothesis','falsified') "
+                "AND (pattern LIKE '%内省假说%' OR pattern LIKE '%梦境���导%')"
+            ).fetchone()[0]
+            # 被证实 / (被证实 + 还在等 + 被推翻)
+            denom = confirmed_from_hyp + hyps
+            vr = round(confirmed_from_hyp / max(denom, 1), 3) if denom > 0 else 0.0
+
         return {
             "total_runs": self.total_runs,
             "total_learned": self.total_learned,
+            "verification_rate": vr,  # v3.6: >0.3 → 系统开始自己走路
             "last_run": self.last_run,
             "budget_contest": self.budget_contest.summary(),
             "recent_history": self.history[-5:],

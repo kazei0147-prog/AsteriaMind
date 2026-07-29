@@ -177,7 +177,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/dashboard":
             self._serve_dashboard()
         elif self.path == "/api/stats":
-            self._json({"stats": db.stats(), "relations": db.count()})
+            ol_summary = ci.offline_learner.summary() if ci.offline_learner else {}
+            self._json({
+                "stats": db.stats(),
+                "relations": db.count(),
+                "dreams": {
+                    "verification_rate": ol_summary.get("verification_rate", 0),
+                    "total_runs": ol_summary.get("total_runs", 0),
+                }
+            })
         elif self.path == "/api/reflect":
             self._handle_reflect()
         elif self.path == "/api/health":
