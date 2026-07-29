@@ -115,6 +115,10 @@ class OfflineLearner:
         self.total_runs += 1
         self.last_run = time.time()
 
+        # ★ v3.6: 假说自动验证 — 新知识进后检查现存假说
+        if self.total_runs % 5 == 0:  # 每 5 轮做一次
+            self._auto_verify_hypotheses()
+
         self.history.append({
             "run": self.total_runs,
             "timestamp": self.last_run,
@@ -245,3 +249,28 @@ class OfflineLearner:
             "budget_contest": self.budget_contest.summary(),
             "recent_history": self.history[-5:],
         }
+
+    def _auto_verify_hypotheses(self):
+        """v3.6: 假说自动验证 — 已确认知识检验现存假说"""
+        if not self.star_map: return
+        cur = self.star_map.conn.cursor()
+        hyps = cur.execute(
+            "SELECT id, subj, pred, obj FROM cognitive_traces "
+            "WHERE feedback='hypothesis'").fetchall()
+        v, f = 0, 0
+        for hid, subj, pred, obj in hyps:
+            # 精确匹配 → 升级为 confirmed
+            if cur.execute(
+                "SELECT id FROM cognitive_traces WHERE subj=? AND pred=? AND obj=? "
+                "AND feedback='confirmed' LIMIT 1", (subj, pred, obj)).fetchone():
+                cur.execute("UPDATE cognitive_traces SET feedback='confirmed' WHERE id=?", (hid,))
+                self.star_map.restore_energy(subj, obj, 0.08); v += 1
+            # 矛盾 → 标记 falsified
+            elif cur.execute(
+                "SELECT obj FROM cognitive_traces WHERE subj=? AND pred=? "
+                "AND feedback='confirmed' AND obj!=? LIMIT 1", (subj, pred, obj)).fetchone():
+                cur.execute("UPDATE cognitive_traces SET feedback='falsified' WHERE id=?", (hid,))
+                self.star_map.consume_energy(subj, obj, 0.1); f += 1
+        if v or f:
+            self.star_map.conn.commit()
+            print(f"  🧪 假说验证: {v} 证实, {f} 推翻")
