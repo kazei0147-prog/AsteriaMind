@@ -10,6 +10,7 @@ v3.3: 反映射闭环 — loop() 接受上轮反馈, 在下一轮开始前喂给
        MetaReasoning (真实预测误差) + MetaCognition (模块权重调整),
        形成"回答→反馈→学习→下次更好"的闭环。
 """
+import re, time, math
 from AsteriaMind.active_inference import ActiveInferenceEngine
 from AsteriaMind.meta_cognition import MetaCognition
 from AsteriaMind.meta_reasoning import MetaReasoningLayer
@@ -169,6 +170,19 @@ class MotherController:
         subj = struct.get("subject", "")
         pred = struct.get("predicate", "")
         obj = struct.get("object", "") or ""
+        # ── v3.6: 语义引擎未提取到主语时, 从星图中匹配 ──
+        if not subj and self.star_map and text:
+            # 滑动窗口提取中文词 (不用贪婪 {2,4})
+            clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
+            for w in (2, 3):
+                for i in range(len(clean) - w + 1):
+                    keyword = clean[i:i + w]
+                    row = self.star_map.conn.execute(
+                        "SELECT COUNT(*) FROM directed_edges WHERE source=? OR target=?",
+                        (keyword, keyword)).fetchone()
+                    if row and row[0] > 1:
+                        subj = keyword; break
+                if subj: break
         prag_type = prag.get("type", "unknown") if isinstance(prag, dict) else getattr(prag, "type", "unknown")
 
         # ── 0.5. Graph Attention: 按问题给边打分 ★ v3.6 ★ ──
