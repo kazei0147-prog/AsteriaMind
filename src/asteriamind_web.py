@@ -415,25 +415,10 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if r.get("success"):
                     return (f"🧮 {r.get('result')}", "math", {})
 
-        # Mother v3 主循环: 含反馈闭环
-        result = ci.process(text)
-        loop = ci.mother.loop(
-            result.get("semantic"), result.get("pragmatic"),
-            text, reflection_ctx or {})
-        reply = loop.get("reply", "?")
-        action = loop.get("action", "unknown")
-        cognitive = loop.get("cognitive", {})
-
-        # ★ v3.6: 救命开关 — 老管线的垃圾回复直接走新管线 ★
-        is_garbage = ("套模板" in reply or
-                      (len(reply) < 8 and len(text) > 2) or
-                      reply.startswith("种子:"))
-        if is_garbage:
-            from AsteriaMind.language_generator import LanguageGenerator
-            lg = LanguageGenerator(ci.mother.star_map)
-            # 从文本提取主语
-            clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
-            subj_candidate = ""
+        # ★ v3.6: 新管线优先 — 直接从星图提取主语, 走叙事流程 ★
+        clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
+        subj_candidate = ""
+        if ci.mother.star_map:
             for w in (2, 3):
                 for i in range(len(clean) - w + 1):
                     kw = clean[i:i+w]
@@ -443,14 +428,25 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     if r and r[0] > 1:
                         subj_candidate = kw; break
                 if subj_candidate: break
-            if subj_candidate:
-                edges = ci.mother.star_map.query_edges(subj_candidate, text)
-                act = [{"node": e["target"], "energy": e["salience"],
-                        "triggers": [e["relation"]], "degree": 0} for e in edges[:5]]
-                narrative = lg._compose_narrative(subj_candidate, act, [])
-                if narrative:
-                    reply = narrative
-                    action = "narrative"
+
+        if subj_candidate:
+            from AsteriaMind.language_generator import LanguageGenerator
+            lg = LanguageGenerator(ci.mother.star_map)
+            edges = ci.mother.star_map.query_edges(subj_candidate, text)
+            act = [{"node": e["target"], "energy": e["salience"],
+                    "triggers": [e["relation"]], "degree": 0} for e in edges[:5]]
+            narrative = lg._compose_narrative(subj_candidate, act, [])
+            if narrative:
+                return (narrative, "narrative", {"subject": subj_candidate})
+
+        # 回退: 老管线
+        result = ci.process(text)
+        loop = ci.mother.loop(
+            result.get("semantic"), result.get("pragmatic"),
+            text, reflection_ctx or {})
+        reply = loop.get("reply", "?")
+        action = loop.get("action", "unknown")
+        cognitive = loop.get("cognitive", {})
         # 携带反馈上下文
         cognitive["reflection_ctx"] = loop.get("reflection_ctx", {})
         cognitive["prev_feedback"] = loop.get("prev_feedback")
