@@ -595,12 +595,8 @@ class CognitiveStarMap:
                 "(sentence,subj,pred,obj,cognitive_id,pattern_type,sentence_type,timestamp) "
                 "VALUES(?,?,?,?,?,?,?,?)",
                 (text, subj, pred, obj, cog_id, lt, stype, time.time()))
-        # 更新共现边权
+        # 有向边: subj →[pred]→ obj
         ts = time.time()
-        _incr_cooccur(self.conn.cursor(), subj, pred, feedback, ts)
-        _incr_cooccur(self.conn.cursor(), subj, obj, feedback, ts)
-        _incr_cooccur(self.conn.cursor(), pred, obj, feedback, ts)
-        # 有向边: subj →[pred]→ obj (保留方向和关系类型)
         _incr_directed(self.conn.cursor(), subj, obj, pred, feedback, ts)
         self.conn.commit()
         return cog_id
@@ -671,13 +667,10 @@ class CognitiveStarMap:
         activation: dict[str, float] = defaultdict(float)
         activated_by: dict[str, set] = defaultdict(set)
 
-        # ── Layer 0: 精确匹配 (优先有向边 + NPMI 过滤) ──
+        # ── Layer 0: 只查有向边 ──
         matched = set()
         for chunk in chunks:
             vec = _directed_vector(self.conn, chunk, "out")
-            is_directed = bool(vec)
-            if not vec:
-                vec = _entity_vector(self.conn, chunk)  # 回退无向共现
             if not vec:
                 continue
             matched.add(chunk)
@@ -696,7 +689,7 @@ class CognitiveStarMap:
         for node in layer0_candidates:
             vec = _directed_vector(self.conn, node, "out")
             if not vec:
-                vec = _entity_vector(self.conn, node)
+                continue
             for neighbor, val in vec.items():
                 if neighbor in activation:
                     continue
@@ -721,7 +714,7 @@ class CognitiveStarMap:
             for node in layer1_candidates:
                 vec = _directed_vector(self.conn, node, "out")
                 if not vec:
-                    vec = _entity_vector(self.conn, node)
+                    continue
                 for neighbor, val in vec.items():
                     if neighbor in activation:
                         continue
@@ -840,8 +833,7 @@ class CognitiveStarMap:
             for j in range(i + 1, len(words)):
                 a, b = words[i], words[j]
                 if a == b: continue
-                _incr_cooccur(cur, a, b, "confirmed", ts)
-                # 有向边: 同段文本内双向弱连接 (relation=co_text)
+                # 有向: 同段文本内双向弱连接 (relation=co_text)
                 _incr_directed(cur, a, b, "co_text", "confirmed", ts)
                 _incr_directed(cur, b, a, "co_text", "confirmed", ts)
         self.conn.commit()
