@@ -242,8 +242,40 @@ class WebResult:
     source_credibility: float = 0.3  # 网络来源默认可信度低
 
 
-class WebSearchInterface:
-    """真正的网络查询接口。适配 WorkBuddy 的 WebSearch 工具。"""
+from urllib.parse import quote, urlencode
+class SearxNGSearch:
+    """SearXNG 元搜索引擎 — 无 API 密钥, 自托管/公共实例均可"""
+
+    def __init__(self, base_url: str = "http://localhost:8080"):
+        self.base_url = base_url.rstrip('/')
+        try:
+            import requests
+            self.session = requests.Session()
+        except ImportError:
+            self.session = None
+
+    def search(self, query: str, max_results: int = 5) -> list[WebResult]:
+        if not self.session:
+            return [WebResult(query=query, url="",
+                    title="需安装 requests", snippet="pip install requests", source_credibility=0)]
+        try:
+            url = f"{self.base_url}/search?q={quote(query)}&format=json"
+            resp = self.session.get(url, timeout=10)
+            data = resp.json()
+            results = []
+            for r in list(data.get('results', []))[:max_results]:
+                results.append(WebResult(
+                    query=query,
+                    url=r.get('url', ''),
+                    title=r.get('title', ''),
+                    snippet=r.get('content', r.get('snippet', '')),
+                    source_credibility=0.6,  # 略高于 DDG
+                ))
+            return results if results else [WebResult(query=query, url="",
+                    title="无结果", snippet="SearXNG 返回空", source_credibility=0.0)]
+        except Exception as e:
+            return [WebResult(query=query, url="",
+                    title="搜索失败", snippet=str(e)[:200], source_credibility=0.0)]
 
     def __init__(self, search_fn=None):
         self.search_fn = search_fn or _default_web_search

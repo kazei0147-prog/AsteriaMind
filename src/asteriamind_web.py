@@ -39,11 +39,18 @@ from AsteriaMind.hypothesis_template import TemplateRegistry, _builtin_templates
 from AsteriaMind.math_reasoner import MathReasoner
 from AsteriaMind.skill_library import build_default_skills
 from AsteriaMind.knowledge_db import KnowledgeDB
-from AsteriaMind.falsification import WebSearchInterface
+from AsteriaMind.falsification import WebSearchInterface, SearxNGSearch
 from AsteriaMind.conversation_memory import ConversationMemory
 from AsteriaMind.cognitive_interface import CognitiveInterface
 
 # ── AM 初始化 ──
+import os, json
+SEARXNG_URL = os.environ.get("SEARXNG_URL", "")
+try:
+    with open("asteria_config.json", "r") as f:
+        SEARXNG_URL = SEARXNG_URL or json.load(f).get("searxng_url", "")
+except Exception: pass
+
 kg = KnowledgeGraph()
 db = KnowledgeDB("asteriamind.db")
 CONV_MEMORY = ConversationMemory(db)
@@ -51,7 +58,12 @@ reg = TemplateRegistry()
 for t in _builtin_templates(): reg.register(t)
 skill_lib = build_default_skills()
 mr = MathReasoner()
-web_search = WebSearchInterface()
+
+if SEARXNG_URL:
+    print(f"  🔍 使用 SearXNG: {SEARXNG_URL}")
+    web_search = WebSearchInterface(search_fn=SearxNGSearch(SEARXNG_URL).search)
+else:
+    web_search = WebSearchInterface()
 ci = CognitiveInterface(kg, db, web_search)
 
 # 从 DB 恢复已有知识
