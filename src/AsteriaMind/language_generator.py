@@ -247,7 +247,7 @@ class LanguageGenerator:
         不做独立从句拼接。先看所有显著边的类型组合，
         再找对应的连接词链，然后一次织成句子。
         """
-        if not self.star_map or not subj or len(activation) < 2:
+        if not self.star_map or not subj or not activation:
             return None
 
         # ── 收集边 (目标, 关系类型) ──
@@ -264,7 +264,7 @@ class LanguageGenerator:
                     (subj, node)):
                     if row[0]: edges.append((node, row[0])); break
 
-        if len(edges) < 2: return None
+        if not edges: return None
 
         # ── 按关系类型分组，保留顺序 ──
         seen: list[str] = []
@@ -275,21 +275,10 @@ class LanguageGenerator:
             if target not in grouped[rel]:
                 grouped[rel].append(target)
 
-        if len(seen) < 2: return None
-
-        # ── 关系 → 从句模板 ──
-        tmpl = {
-            "NOT_CAN": lambda ts: f"不会{'、'.join(ts)}",
-            "NOT_IS_A": lambda ts: f"不是{'、'.join(ts)}",
-            "IS_A": lambda ts: f"属于{'、'.join(ts)}",
-            "CAN": lambda ts: f"能{'、'.join(ts)}",
-            "HAS": lambda ts: f"有{'、'.join(ts)}",
-            "ORBITS": lambda ts: f"绕{'、'.join(ts)}转",
-        }
-        clauses = [tmpl.get(rel, lambda ts: "、".join(ts))(grouped[rel][:3]) for rel in seen]
+        if not seen: return None
 
         # ── 按"先否定，再分类，再能力"顺序排列 ──
-        order = {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1, "CAN": 2, "HAS": 3, "ORBITS": 4}
+        order = {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1, "CAN": 2, "EATS": 3, "HAS": 4, "ORBITS": 5}
         seen.sort(key=lambda r: order.get(r, 99))
 
         parts = []
@@ -303,10 +292,13 @@ class LanguageGenerator:
                 parts.append(f"能{'、'.join(targets)}")
             elif rel == "HAS":
                 parts.append(f"具有{'、'.join(targets)}")
-            elif rel == "ORBITS":
-                parts.append(f"绕{'、'.join(targets)}转")
+            elif rel == "EATS":
+                parts.append(f"吃{'、'.join(targets)}")
+            elif rel == "LIVES_IN":
+                parts.append(f"生活在{'、'.join(targets)}")
 
-        if len(parts) < 2: return None
+        if len(parts) == 1:
+            return f"{subj}{parts[0]}。"
 
         # ── 根据首从句类型决定连接结构 ──
         first_rel = seen[0]
