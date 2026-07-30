@@ -105,6 +105,20 @@ def _incr_directed(cur, source: str, target: str, relation: str = "",
         (source, target, relation, conf_boost, ts, conf_boost, ts))
 
 
+def _incr_co_text(cur, a: str, b: str, ts: float = 0):
+    """★ v3.6: 联想代谢 — co_text 边 0.1 起步, 重复才涨, 上限 1.0"""
+    if not a or not b or a == b: return
+    ts = ts or time.time()
+    cur.execute(
+        "INSERT INTO directed_edges(source,target,relation,weight,confidence,energy,last_update) "
+        "VALUES(?,?,'co_text',1,0.3,0.1,?) "
+        "ON CONFLICT(source,target,relation) DO UPDATE SET "
+        "weight=weight+1, "
+        "energy=MIN(energy+0.05, 1.0), "
+        "last_update=?",
+        (a, b, ts, ts))
+
+
 def _effective_weight(row) -> float:
     """动态边权: weight × confidence × time_decay"""
     weight = row[0] if isinstance(row, tuple) else row["weight"]
@@ -905,9 +919,9 @@ class CognitiveStarMap:
             for j in range(i + 1, len(words)):
                 a, b = words[i], words[j]
                 if a == b: continue
-                # 有向: 同段文本内双向弱连接 (relation=co_text)
-                _incr_directed(cur, a, b, "co_text", "confirmed", ts)
-                _incr_directed(cur, b, a, "co_text", "confirmed", ts)
+                # ★ v3.6: 联想能量 — co_text 边 0.1 起步, 重复才涨 ★
+                _incr_co_text(cur, a, b, ts)
+                _incr_co_text(cur, b, a, ts)
         self.conn.commit()
 
     def emergent_reply(self, text: str, subj: str, pred: str, obj: str) -> dict:
