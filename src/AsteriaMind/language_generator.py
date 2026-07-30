@@ -277,8 +277,26 @@ class LanguageGenerator:
 
         if not seen: return None
 
-        # ── 按"否定→分类→能力→食性→特征→栖息"固定顺序 ──
-        order = {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1, "CAN": 2, "EATS": 3, "HAS": 4, "ORBITS": 4, "LIVES_IN": 5}
+        # ── ★ v3.6: 意图驱动的三层排序 ★ ──
+        # Layer 1 (身份): IS_A, NOT_IS_A
+        # Layer 2 (核心): NOT_CAN, CAN, HAS
+        # Layer 3 (背景): EATS, LIVES_IN, ORBITS
+        INTENT_ORDER = {
+            "EXPLAIN": {"IS_A": 0, "NOT_IS_A": 0,
+                        "NOT_CAN": 1, "CAN": 1, "HAS": 1,
+                        "EATS": 2, "LIVES_IN": 2, "ORBITS": 2},
+            "DEFINE":  {"IS_A": 0, "NOT_IS_A": 0,
+                        "NOT_CAN": 1, "CAN": 1, "HAS": 1,
+                        "EATS": 2, "LIVES_IN": 2, "ORBITS": 2},
+            "CORRECT": {"NOT_CAN": 0, "NOT_IS_A": 0,
+                        "IS_A": 1, "CAN": 1, "HAS": 2,
+                        "EATS": 3, "LIVES_IN": 3, "ORBITS": 3},
+            "CONFIRM": {"IS_A": 0, "HAS": 1,
+                        "NOT_CAN": 2, "CAN": 2, "EATS": 3, "LIVES_IN": 3},
+        }
+        order = INTENT_ORDER.get(intent, {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1,
+                                           "CAN": 2, "EATS": 3, "HAS": 4,
+                                           "ORBITS": 4, "LIVES_IN": 5})
         seen.sort(key=lambda r: order.get(r, 99))
 
         parts = []

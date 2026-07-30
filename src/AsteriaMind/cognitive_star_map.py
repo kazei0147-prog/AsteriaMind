@@ -522,13 +522,28 @@ class CognitiveStarMap:
             (relation_type, intent, symbol))
         self.conn.commit()
 
+    # ── 安全词汇白名单: 每种关系只有这些词是合法的 ──
+    SAFE_WORDS = {
+        "NOT_CAN": ["不会", "不能", "无法", "不具备", "做不到"],
+        "NOT_IS_A": ["不是", "并非"],
+        "IS_A": ["属于", "是", "是一种", "作为一种"],
+        "CAN": ["能", "会", "可以", "擅长", "善于"],
+        "HAS": ["具有", "有", "拥有", "具备"],
+        "EATS": ["吃", "以...为食", "捕食", "猎食"],
+        "LIVES_IN": ["生活在", "栖息于", "分布在"],
+        "ORBITS": ["绕", "环绕", "围绕"],
+    }
+
     def pick_word(self, relation_type: str, intent: str = "ASK", default: str = "") -> str:
         """选词: 在给定关系类型+意图下, 频率最高的符号"""
         row = self.conn.execute(
             "SELECT symbol, count FROM symbol_star "
             "WHERE relation_type=? AND intent=? ORDER BY count DESC LIMIT 1",
             (relation_type, intent)).fetchone()
-        if row: return row[0]
+        if row:
+            safe = self.SAFE_WORDS.get(relation_type, [])
+            if row[0] in safe:
+                return row[0]
         # 回退: 查通用 ASK 意图
         if intent != "ASK":
             row = self.conn.execute(

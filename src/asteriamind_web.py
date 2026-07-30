@@ -35,7 +35,12 @@ def _auto_export():
 sys.path.insert(0, str(Path(__file__).parent))
 
 from AsteriaMind.knowledge import KnowledgeGraph
-from AsteriaMind.hypothesis_template import TemplateRegistry, _builtin_templates
+# v3.6: TemplateRegistry/Old imports stubbed — legacy template path deprecated
+class TemplateRegistry:
+    templates = []
+    def register(self, t): self.templates.append(t)
+def _builtin_templates(): return []
+
 from AsteriaMind.math_reasoner import MathReasoner
 from AsteriaMind.skill_library import build_default_skills
 from AsteriaMind.knowledge_db import KnowledgeDB
@@ -419,8 +424,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
         subj_candidate = ""
 
-        # 打招呼 → 直回
-        if text in ('你好','您好','嗨','在吗','hello','hi'):
+        # 打招呼 / 身份 → 直回
+        if text in ('你好','您好','嗨','在吗','hello','hi','你是谁','你叫什么','你是谁啊'):
             return ("你好！我是 AsteriaMind——一个基于认知星图和能量扩散的学习系统。"
                     "你可以问我关于动物、植物、天文的问题，或者教我新知识。", "greeting", {})
 
@@ -441,9 +446,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             intent = infer_intent(text)
             lg = LanguageGenerator(ci.mother.star_map)
             edges = ci.mother.star_map.query_edges(subj_candidate, text)
+            # 过滤: 只保留命名关系, 排除 co_text 噪音
+            edges = [e for e in edges if e["relation"] != "co_text"]
             edges = apply_intent_weight(edges, intent)
             act = [{"node": e["target"], "energy": e["salience"],
-                    "triggers": [e["relation"]], "degree": 0} for e in edges[:5]]
+                    "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
             narrative = lg._compose_narrative(subj_candidate, act, [], intent=intent)
             if narrative:
                 # ★ v3.6: 知识闭环 — 使用的边写回星图, 能量+1 ★
