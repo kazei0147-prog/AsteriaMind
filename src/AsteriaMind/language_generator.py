@@ -240,7 +240,7 @@ class LanguageGenerator:
 
     # ── v3.6: 关系驱动的叙事生成 ──
     def _compose_narrative(self, subj: str, activation: list[dict],
-                            evidence: list) -> str | None:
+                            evidence: list, intent: str = "ASK") -> str | None:
         """
         v3.6 final: 边 → 关系模式 → 连���词链 → 一句话。
 
@@ -284,18 +284,20 @@ class LanguageGenerator:
         parts = []
         for rel in seen:
             targets = grouped[rel][:3]
+            word = self.star_map.pick_word(rel, intent) if self.star_map else ""
             if rel in ("NOT_CAN", "NOT_IS_A"):
-                parts.append(f"{'不会' if 'CAN' in rel else '不是'}{'、'.join(targets)}")
+                prefix = word or ("不会" if "CAN" in rel else "不是")
+                parts.append(f"{prefix}{'、'.join(targets)}")
             elif rel == "IS_A":
-                parts.append(f"属于{'、'.join(targets)}")
+                parts.append(f"{word or '属于'}{'、'.join(targets)}")
             elif rel == "CAN":
-                parts.append(f"能{'、'.join(targets)}")
+                parts.append(f"{word or '能'}{'、'.join(targets)}")
             elif rel == "HAS":
-                parts.append(f"具有{'、'.join(targets)}")
+                parts.append(f"{word or '具有'}{'、'.join(targets)}")
             elif rel == "EATS":
-                parts.append(f"吃{'、'.join(targets)}")
+                parts.append(f"{word or '吃'}{'、'.join(targets)}")
             elif rel == "LIVES_IN":
-                parts.append(f"生活在{'、'.join(targets)}")
+                parts.append(f"{word or '生活在'}{'、'.join(targets)}")
 
         if len(parts) == 1:
             return f"{subj}{parts[0]}。"

@@ -297,6 +297,16 @@ class CognitiveStarMap:
                     last_update REAL
                 );
                 CREATE INDEX IF NOT EXISTS idx_lp_action ON lang_patterns(action_type, confidence_bucket);
+                -- ★ v3.6: 符号星图 — 关系+意图 → 符号+频次 ★
+                CREATE TABLE IF NOT EXISTS symbol_star (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    relation_type TEXT NOT NULL,
+                    intent TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    count INTEGER DEFAULT 1,
+                    UNIQUE(relation_type, intent, symbol)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ss_ri ON symbol_star(relation_type, intent);
             """)
         # v3.5: 自动迁移 — sentence_type 列
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='language_traces'")
@@ -501,6 +511,32 @@ class CognitiveStarMap:
             "ON CONFLICT(rel_a,rel_b,connector) DO UPDATE SET count=count+1",
             (rel_a, rel_b, connector))
         self.conn.commit()
+
+    # ── v3.6: 符号星图 — 关系+意图 → 符号+频次 ──
+
+    def learn_symbol(self, relation_type: str, intent: str, symbol: str):
+        """学习: 在某种关系+意图下, 这个符号被用了多少次"""
+        self.conn.execute(
+            "INSERT INTO symbol_star(relation_type,intent,symbol,count) VALUES(?,?,?,1) "
+            "ON CONFLICT(relation_type,intent,symbol) DO UPDATE SET count=count+1",
+            (relation_type, intent, symbol))
+        self.conn.commit()
+
+    def pick_word(self, relation_type: str, intent: str = "ASK", default: str = "") -> str:
+        """选词: 在给定关系类型+意图下, 频率最高的符号"""
+        row = self.conn.execute(
+            "SELECT symbol, count FROM symbol_star "
+            "WHERE relation_type=? AND intent=? ORDER BY count DESC LIMIT 1",
+            (relation_type, intent)).fetchone()
+        if row: return row[0]
+        # 回退: 查通用 ASK 意图
+        if intent != "ASK":
+            row = self.conn.execute(
+                "SELECT symbol, count FROM symbol_star "
+                "WHERE relation_type=? AND intent='ASK' ORDER BY count DESC LIMIT 1",
+                (relation_type,)).fetchone()
+            if row: return row[0]
+        return default
 
     # ═══════════════════════════════════════
     #  v3.6: Graph Attention — 按问题给边打分

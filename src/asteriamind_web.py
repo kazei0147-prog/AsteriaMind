@@ -437,11 +437,14 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         if subj_candidate:
             from AsteriaMind.language_generator import LanguageGenerator
+            from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
+            intent = infer_intent(text)
             lg = LanguageGenerator(ci.mother.star_map)
             edges = ci.mother.star_map.query_edges(subj_candidate, text)
+            edges = apply_intent_weight(edges, intent)
             act = [{"node": e["target"], "energy": e["salience"],
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:5]]
-            narrative = lg._compose_narrative(subj_candidate, act, [])
+            narrative = lg._compose_narrative(subj_candidate, act, [], intent=intent)
             if narrative:
                 # ★ v3.6: 知识闭环 — 使用的边写回星图, 能量+1 ★
                 for e in edges[:3]:
