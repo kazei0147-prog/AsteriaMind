@@ -15,18 +15,19 @@ import sys, os, re, time
 sys.path.insert(0, os.path.dirname(__file__))
 from AsteriaMind.cognitive_star_map import CognitiveStarMap
 
-# ── 关系模式 → 符号提取的正则 ──
-# 这些不是精确的三元组提取, 是从中文自然句里抓"关系动词+前后词"的统计
-SYMBOL_PATTERNS = [
-    # (正则, 关系类型, 意图)
-    (r'((?:不会|不能|无法|不具备|做不到|没法)\s*[\u4e00-\u9fff]{1,6})', "NOT_CAN", "ASK"),
-    (r'((?:不是|并非)\s*[\u4e00-\u9fff]{1,6})', "NOT_IS_A", "ASK"),
-    (r'((?:属于|是|为|作为一种)\s*[\u4e00-\u9fff]{1,6})', "IS_A", "ASK"),
-    (r'((?:能|会|可以|擅长|善于)\s*[\u4e00-\u9fff]{1,6})', "CAN", "ASK"),
-    (r'((?:具有|有|拥有|具备)\s*[\u4e00-\u9fff]{1,6})', "HAS", "ASK"),
-    (r'((?:生活在|栖息于|分布在)\s*[\u4e00-\u9fff]{1,6})', "LIVES_IN", "ASK"),
-    (r'((?:以..为食|吃|捕食|猎食)\s*[\u4e00-\u9fff]{1,6})', "EATS", "ASK"),
+# ── 关系动词正则: 只抓动词本身, 不抓完整短语 ──
+VERB_PATTERNS = [
+    (r'(不会|不能|无法|不具备|做不到|没法)', "NOT_CAN", "ASK"),
+    (r'(不是|并非)', "NOT_IS_A", "ASK"),
+    (r'(属于|是一种|作为)', "IS_A", "ASK"),
+    (r'(会|可以|擅长|善于|能)', "CAN", "ASK"),
+    (r'(具有|拥有|具备|有)', "HAS", "ASK"),
+    (r'(生活|栖息|分布)', "LIVES_IN", "ASK"),
+    (r'(捕食|猎食|吃)', "EATS", "ASK"),
 ]
+
+# 排除词: 太通用的功能词不计入
+EXCLUDE_VERBS = {"是", "能", "会", "有", "吃"}
 
 def feed_file(filepath: str, star: CognitiveStarMap, min_chars: int = 8):
     """啃一本书/一篇文章"""
@@ -53,9 +54,10 @@ def feed_file(filepath: str, star: CognitiveStarMap, min_chars: int = 8):
             "confirmed", para)
 
         # 3. 抓关系动词 → symbol_star 频次
-        for pattern, rel, intent in SYMBOL_PATTERNS:
+        for pattern, rel, intent in VERB_PATTERNS:
             for match in re.findall(pattern, para):
-                star.learn_symbol(rel, intent, match)
+                if match not in EXCLUDE_VERBS:
+                    star.learn_symbol(rel, intent, match)
 
         ingested += 1
 
