@@ -443,6 +443,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:5]]
             narrative = lg._compose_narrative(subj_candidate, act, [])
             if narrative:
+                # ★ v3.6: 知识闭环 — 使用的边写回星图, 能量+1 ★
+                for e in edges[:3]:
+                    ci.mother.star_map.restore_energy(subj_candidate, e["target"], 0.03)
                 return (narrative, "narrative", {"subject": subj_candidate})
 
         # 回退: 老管线
