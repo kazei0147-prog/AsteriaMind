@@ -557,17 +557,13 @@ class CognitiveStarMap:
     #  v3.6: Graph Attention — 按问题给边打分
     # ═══════════════════════════════════════
 
-    def query_edges(self, subj: str, query: str, top_k: int = 8) -> list[dict]:
+    def query_edges(self, subj: str, query: str, top_k: int = 8,
+                     space: str = "belief") -> list[dict]:
         """
-        图上注意力——不是找能量最高的节点，而是找"当前问题最关心"的边。
-
-        Score(e) = Energy × Confidence × Relevance × RelationPriority
-
-        问"企鹅会飞吗":
-          IS_A→鸟类: E=0.95, R=0.1 → 0.10  ← 不重要
-          NOT_CAN→飞: E=0.70, R=1.0 → 0.70  ← 主角！
-
-        返回: [{target, relation, energy, salience, confidence}, ...]
+        ★ v3.6: 认知分层查询
+        space="belief":     命名关系 (IS_A/CAN/NOT_CAN/...) — 用于叙事
+        space="association": co_text 边 — 用于激活扩散
+        space="all":        不过滤
         """
         from collections import defaultdict
 
@@ -588,6 +584,16 @@ class CognitiveStarMap:
             "COALESCE(energy, 1.0) FROM directed_edges WHERE source=?",
             (subj,)):
             target, rel, weight, conf, edge_energy = row
+
+            # ★ v3.6: 空间过滤
+            NAMED_RELATIONS = {
+                "NOT_CAN", "NOT_IS_A", "IS_A", "CAN",
+                "HAS", "EATS", "LIVES_IN", "ORBITS",
+            }
+            if space == "belief" and rel not in NAMED_RELATIONS:
+                continue
+            elif space == "association" and rel != "co_text":
+                continue
 
             # ── Relevance: 目标和查询词的重叠度 ──
             overlap = 0

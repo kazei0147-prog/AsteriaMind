@@ -444,11 +444,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             from AsteriaMind.language_generator import LanguageGenerator
             from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
             intent = infer_intent(text)
+            print(f"[intent] {text} → {intent}", flush=True)  # debug
             lg = LanguageGenerator(ci.mother.star_map)
-            edges = ci.mother.star_map.query_edges(subj_candidate, text)
-            # 过滤: 只保留命名关系, 排除 co_text 噪音
-            edges = [e for e in edges if e["relation"] != "co_text"]
+            edges = ci.mother.star_map.query_edges(subj_candidate, text,
+                                                       space="belief")
             edges = apply_intent_weight(edges, intent)
+            # 强制排序: 否定永远第一
+            ORDER = {"NOT_CAN": -10, "NOT_IS_A": -9, "IS_A": 1,
+                     "CAN": 2, "EATS": 3, "HAS": 4, "LIVES_IN": 5}
+            edges.sort(key=lambda e: ORDER.get(e["relation"], 99))
             act = [{"node": e["target"], "energy": e["salience"],
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
             narrative = lg._compose_narrative(subj_candidate, act, [], intent=intent)

@@ -282,6 +282,9 @@ class LanguageGenerator:
         # Layer 2 (核心): NOT_CAN, CAN, HAS
         # Layer 3 (背景): EATS, LIVES_IN, ORBITS
         INTENT_ORDER = {
+            "ASK":     {"NOT_CAN": 0, "NOT_IS_A": 0,
+                        "IS_A": 1, "CAN": 2, "EATS": 3, "HAS": 4,
+                        "ORBITS": 4, "LIVES_IN": 5},
             "EXPLAIN": {"IS_A": 0, "NOT_IS_A": 0,
                         "NOT_CAN": 1, "CAN": 1, "HAS": 1,
                         "EATS": 2, "LIVES_IN": 2, "ORBITS": 2},
