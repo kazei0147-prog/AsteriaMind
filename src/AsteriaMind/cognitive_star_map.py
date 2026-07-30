@@ -874,17 +874,25 @@ class CognitiveStarMap:
         """
         文本 → 词对共现 → co_text 有向边。
 
-        重叠 2-3 字滑动窗口，过滤包含功能字的碎片。
+        重叠 2-3 字滑动窗口，过滤功能字 + 高频无意义词。
         """
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
-        # 功能字: 纯语法标记，不是概念
+        # 功能字: 纯语法标记
         func_chars = set('的了一是也在吗呢但而且很就都还要会能有这那它他她们不过与或和所以因为虽然')
+        # 停用词: 高频无区分度词
+        STOP_WORDS = {
+            "有关", "这个", "那个", "一种", "这些", "那些", "每个", "任何",
+            "所有", "一些", "可能", "已经", "可以", "需要", "没有", "不同",
+            "问题", "方法", "系统", "过程", "结果", "作用", "关系",
+            "自己", "它们", "一个", "一种", "不是", "都是", "就是",
+        }
         words = set()
         for w in (2, 3):
             for i in range(len(clean) - w + 1):
                 word = clean[i:i + w]
-                if len(word) < 2 or any(c in func_chars for c in word):
-                    continue
+                if len(word) < 2: continue
+                if any(c in func_chars for c in word): continue
+                if word in STOP_WORDS: continue
                 words.add(word)
         words = list(words)
         if len(words) < 2:

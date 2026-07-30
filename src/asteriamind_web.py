@@ -444,20 +444,14 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             from AsteriaMind.language_generator import LanguageGenerator
             from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
             intent = infer_intent(text)
-            print(f"[intent] {text} → {intent}", flush=True)  # debug
             lg = LanguageGenerator(ci.mother.star_map)
             edges = ci.mother.star_map.query_edges(subj_candidate, text,
                                                        space="belief")
             edges = apply_intent_weight(edges, intent)
-            # 强制排序: 否定永远第一
-            ORDER = {"NOT_CAN": -10, "NOT_IS_A": -9, "IS_A": 1,
-                     "CAN": 2, "EATS": 3, "HAS": 4, "LIVES_IN": 5}
-            edges.sort(key=lambda e: ORDER.get(e["relation"], 99))
             act = [{"node": e["target"], "energy": e["salience"],
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
             narrative = lg._compose_narrative(subj_candidate, act, [], intent=intent)
             if narrative:
-                # ★ v3.6: 知识闭环 — 使用的边写回星图, 能量+1 ★
                 for e in edges[:3]:
                     ci.mother.star_map.restore_energy(subj_candidate, e["target"], 0.03)
                 return (narrative, "narrative", {"subject": subj_candidate})
