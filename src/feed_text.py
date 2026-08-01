@@ -29,6 +29,14 @@ VERB_PATTERNS = [
 # 排除词: 太通用的功能词不计入
 EXCLUDE_VERBS = {"是", "能", "会", "有", "吃"}
 
+# ── 句式骨架提取: 段落 → lang_patterns ──
+NAMED_RELS = {"NOT_CAN", "NOT_IS_A", "IS_A", "CAN", "HAS", "EATS", "LIVES_IN", "ORBITS"}
+REPLACE_MAP = {
+    "NOT_CAN": "{NOT_CAN}", "NOT_IS_A": "{NOT_IS_A}", "IS_A": "{IS_A}",
+    "CAN": "{CAN}", "HAS": "{HAS}", "EATS": "{EATS}",
+    "LIVES_IN": "{LIVES_IN}", "ORBITS": "{ORBITS}",
+}
+
 def feed_file(filepath: str, star: CognitiveStarMap, min_chars: int = 8):
     """啃一本书/一篇文章"""
     with open(filepath, "r", encoding="utf-8") as f:
@@ -59,10 +67,74 @@ def feed_file(filepath: str, star: CognitiveStarMap, min_chars: int = 8):
                 if match not in EXCLUDE_VERBS:
                     star.learn_symbol(rel, intent, match)
 
+        # 4. ★ v3.6: 句式骨架提取 → lang_patterns 自动学习 ★
+        _extract_pattern(star, para)
+
         ingested += 1
 
     star.conn.commit()
     return ingested
+
+
+def _extract_pattern(star: CognitiveStarMap, para: str):
+    """从句中找出命名实体, 替换为占位符, 生成句式骨架"""
+    if len(para) < 10: return
+    # 找出句中所有在星图中有命名关系的实体
+    entities_found = []
+    for w in (3, 2, 4):
+        for i in range(len(para) - w + 1):
+            kw = para[i:i+w]
+            if kw in entities_found: continue
+            n = star.conn.execute(
+                "SELECT COUNT(*) FROM directed_edges "
+                "WHERE source=? AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS')",
+                (kw,)).fetchone()[0]
+            if n >= 2:
+                entities_found.append(kw)
+    if not entities_found: return
+
+    # 用第一个实体做主语, 查它的关系目标
+    subj = entities_found[0]
+    targets_by_rel = {}
+    for row in star.conn.execute(
+        "SELECT DISTINCT relation, target FROM directed_edges "
+        "WHERE source=? AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS')",
+        (subj,)):
+        rel, target = row
+        if rel not in targets_by_rel: targets_by_rel[rel] = []
+        if target not in targets_by_rel[rel]:
+            targets_by_rel[rel].append((target, len(target)))  # (target, length)
+    if not targets_by_rel: return
+
+    # 在段落中替换具体词 → 占位符
+    pattern = para
+    replaced = set()
+    for rel, targs in sorted(targets_by_rel.items(), key=lambda x: -max(t[1] for t in x[1])):
+        for target, _ in targs:
+            if target in pattern and target not in replaced:
+                pattern = pattern.replace(target, REPLACE_MAP.get(rel, rel), 1)
+                replaced.add(target)
+    # 替换主语
+    pattern = pattern.replace(subj, "{subj}", 1)
+
+    # 至少替换了 2 个槽位才算有效句式
+    slot_count = pattern.count('{')
+    if slot_count < 3: return  # 需要 {subj} + 至少 2 个关系槽
+
+    # 存入 lang_patterns (先查后插, 避免重复)
+    ts = __import__('time').time()
+    existing = star.conn.execute(
+        "SELECT id, count FROM lang_patterns WHERE body_template=? LIMIT 1",
+        (pattern,)).fetchone()
+    if existing:
+        star.conn.execute(
+            "UPDATE lang_patterns SET count=count+1, last_update=? WHERE id=?",
+            (ts, existing[0]))
+    else:
+        star.conn.execute(
+            "INSERT INTO lang_patterns(action_type, confidence_bucket, source, opener, body_template, closer, count, last_update) "
+            "VALUES(?,?,?,?,?,?,1,?)",
+            ("info_request", "mid", "auto", "", pattern, "", ts))
 
 
 def feed_directory(dirpath: str, star: CognitiveStarMap):
