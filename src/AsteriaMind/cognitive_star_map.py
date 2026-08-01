@@ -571,6 +571,40 @@ class CognitiveStarMap:
     #  v3.6: Graph Attention — 按问题给边打分
     # ═══════════════════════════════════════
 
+    def reason_about(self, subj: str, rel_hint: str = "") -> list[dict]:
+        """
+        ★ v3.6: 一步反向推理
+        "羽毛会飞吗" → 羽毛 没有 CAN→飞
+          → 谁 HAS 羽毛？→ 鸟类
+          → 鸟类 CAN 飞行？→ 是！
+          → 返回: [{target:'鸟类', relation:'HAS→CAN', ...}]
+        """
+        results = []
+        seen = set()
+        # 1. 查找"谁以什么关系指向 subj"（subj 是 target 的边）
+        for row in self.conn.execute(
+            "SELECT source, relation, energy FROM directed_edges "
+            "WHERE target=? AND relation IN ('NOT_CAN','IS_A','CAN','HAS','EATS','LIVES_IN') "
+            "ORDER BY energy DESC LIMIT 8",
+            (subj,)):
+            source, rel, energy = row
+            if source in seen: continue
+            seen.add(source)
+            # 2. 对每个指向者, 查它自己的命名边
+            sub_results = []
+            for r2 in self.conn.execute(
+                "SELECT target, relation, energy FROM directed_edges "
+                "WHERE source=? AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS') "
+                "ORDER BY energy DESC LIMIT 4",
+                (source,)):
+                sub_results.append({
+                    "source": source, "from_rel": rel,
+                    "relation": r2[1], "target": r2[0],
+                    "energy": round(energy * r2[2], 3),
+                })
+            results.extend(sub_results)
+        return results
+
     def query_edges(self, subj: str, query: str, top_k: int = 8,
                      space: str = "belief") -> list[dict]:
         """

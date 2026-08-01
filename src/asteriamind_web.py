@@ -442,6 +442,13 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             lg = LanguageGenerator(ci.mother.star_map)
             edges = ci.mother.star_map.query_edges(subj_candidate, text,
                                                        space="belief")
+            # ★ v3.6: 零边 → 反向推理 → "羽毛会飞吗" → 鸟有羽毛、鸟会飞 ★
+            if not edges:
+                reasoned = ci.mother.star_map.reason_about(subj_candidate)
+                if reasoned:
+                    edges = [{"target": r["target"], "relation": r["relation"],
+                              "salience": r.get("energy", 0.5), "energy": r.get("energy", 0.5)}
+                             for r in reasoned[:5]]
             edges = apply_intent_weight(edges, intent)
             act = [{"node": e["target"], "energy": e["salience"],
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
