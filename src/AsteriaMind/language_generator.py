@@ -293,6 +293,15 @@ class LanguageGenerator:
 
         if not seen: return None
 
+        # ★ v3.6: 优先查真人说过的话 ★
+        if self.star_map:
+            trace = self.star_map.conn.execute(
+                "SELECT source_text FROM language_traces "
+                "WHERE source_text LIKE ? AND length(source_text) < 120 "
+                "LIMIT 1", (f"%{subj}%",)).fetchone()
+            if trace and len(trace[0]) > 20:
+                return trace[0]
+
         # ★ v3.6: 优先匹配学习到的句式 ★
         best_pattern = self._match_pattern(seen, intent)
         if best_pattern:

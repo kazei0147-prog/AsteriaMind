@@ -407,7 +407,41 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if r.get("success"):
                     return (f"🧮 {r.get('result')}", "math", {})
 
-        # ★ v3.6: 新管线优先 ★
+        # ★ v3.6: 短期记忆 + 元认知 + 代词解析 ★
+        last_subj = ""
+        if context:
+            # 从上下文提取上一轮主语
+            m = re.search(r'\[user\]:\s*(.+)', context)
+            if m:
+                prev_q = m.group(1)
+                prev_clean = re.sub(r'[^\u4e00-\u9fff]', '', prev_q)
+                for w in (3, 2):
+                    for i in range(len(prev_clean) - w + 1):
+                        kw = prev_clean[i:i+w]
+                        c = ci.mother.star_map.conn.execute(
+                            "SELECT COUNT(*) FROM directed_edges WHERE source=? OR target=?",
+                            (kw, kw)).fetchone()
+                        if c and c[0] > 1:
+                            last_subj = kw; break
+                    if last_subj: break
+            # 元认知: 检测用户反馈
+            if re.search(r'(说的对|正确|没错|是的|对呀)', text):
+                if ci.mother and hasattr(ci.mother, 'meta_cognition'):
+                    ci.mother.meta_cognition.learn_from_reflection("narrative", True)
+            elif re.search(r'(不对|错了|不是|不是这样|不对哦)', text):
+                if ci.mother and hasattr(ci.mother, 'meta_cognition'):
+                    ci.mother.meta_cognition.learn_from_reflection("narrative", False)
+
+        # 代词解析: 它/这/那/它们 → 上一轮主语
+        if text.strip() in ('它','她','他','这','那','它们','她们','他们'):
+            if last_subj:
+                text = last_subj
+            else:
+                return ("请问你指的是？", "clarify", {})
+        # 追问: "还有呢"/"为什么"/"那..." → 保持主语
+        if re.match(r'^(还有|为什么|那|那么|这个|那个|这些)', text) and last_subj:
+            text = f"{last_subj}{text}"
+
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
         subj_candidate = ""
 
