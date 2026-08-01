@@ -274,13 +274,16 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 }
                 self.SESSIONS[sid] = session
 
-            # ── 持久对话上下文 ──
+            # ── 短期记忆: 最近 4 轮对话 ★ ──
             topic = self._extract_topic(text)
             CONV_MEMORY.add(sid, "user", text, topic)
+            recent = CONV_MEMORY.get_recent(sid, n=4)
+            short_mem = "\n".join(f"[{r['role']}]: {r['content'][:120]}" for r in recent)
+            # 长记忆上下文
             context_str = CONV_MEMORY.get_context_string(sid, text)
 
             reply, action, cognitive = self._process(
-                text, context=context_str)
+                text, context=(short_mem + "\n---\n" + (context_str or "")))
 
             # ── 更新会话 ──
             session["last_active"] = now
