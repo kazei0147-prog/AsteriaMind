@@ -511,6 +511,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             if narrative:
                 for e in edges[:3]:
                     ci.mother.star_map.restore_energy(subj, e["target"], 0.03)
+                # ★ v3.6: 自学习 — 每个成功回答更新自我认知 ★
+                ci.mother.star_map.store("我", "CAN", "回答问题",
+                    "confirmed", f"成功回答: {subj}({plan.strategy})")
                 return (narrative, "narrative", {"subject": subj})
 
         # 回退: 星图不可用

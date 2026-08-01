@@ -293,12 +293,13 @@ class LanguageGenerator:
 
         if not seen: return None
 
-        # ★ v3.6: 优先查真人说过的话 ★
-        if self.star_map:
+        # ★ v3.6: 优先查真人说过的话 (只对动物实体, 过滤 GEB 噪音) ★
+        if self.star_map and len(subj) >= 2:
             trace = self.star_map.conn.execute(
                 "SELECT sentence FROM language_traces "
-                "WHERE sentence LIKE ? AND length(sentence) < 120 "
-                "LIMIT 1", (f"%{subj}%",)).fetchone()
+                "WHERE sentence LIKE ? AND length(sentence) BETWEEN 30 AND 100 "
+                "AND sentence_type IS NOT 'title' "
+                "ORDER BY id DESC LIMIT 1", (f"%{subj}%",)).fetchone()
             if trace and len(trace[0]) > 20:
                 return trace[0]
 

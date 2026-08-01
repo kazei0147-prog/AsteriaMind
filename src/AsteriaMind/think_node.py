@@ -124,7 +124,8 @@ class ThinkNode:
                 if kw in ('什么', '怎么', '哪里', '为什么', '是不是', '会不会'):
                     continue
                 c = self.star_map.conn.execute(
-                    "SELECT COUNT(*) FROM directed_edges WHERE source=? OR target=?",
+                    "SELECT COUNT(*) FROM directed_edges WHERE (source=? OR target=?) "
+                    "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS')",
                     (kw, kw)).fetchone()
                 if c and c[0] > 0:
                     return kw
