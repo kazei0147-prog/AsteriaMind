@@ -181,6 +181,22 @@ class LanguageGenerator:
             patterns = ["陈述", "X是Y"]
         return patterns
 
+    def _match_pattern(self, seen: list[str], intent: str) -> dict | None:
+        """从 lang_patterns 匹配最合适的句式, 返回 {opener, body_template, closer} 或 None"""
+        if not self.star_map: return None
+        # 意图 → confidence_bucket 映射
+        bucket = {"CORRECT": "mid", "EXPLAIN": "mid", "ASK": "mid",
+                  "CONFIRM": "high", "COMPARE": "mid"}.get(intent, "mid")
+        rows = self.star_map.conn.execute(
+            "SELECT opener, body_template, closer, count FROM lang_patterns "
+            "WHERE action_type='info_request' AND confidence_bucket=? AND source=? "
+            "ORDER BY count DESC LIMIT 3",
+            (bucket, intent.lower())).fetchall()
+        if rows:
+            best = rows[0]
+            return {"opener": best[0], "body_template": best[1], "closer": best[2]}
+        return None
+
     def _query_language_traces(self, action: str, pred: str,
                                 confidence_bucket: str) -> dict:
         """
@@ -276,6 +292,19 @@ class LanguageGenerator:
                 grouped[rel].append(target)
 
         if not seen: return None
+
+        # ★ v3.6: 优先匹配学习到的句式 ★
+        best_pattern = self._match_pattern(seen, intent)
+        if best_pattern:
+            slots = {rel: '、'.join(targets[:2]) for rel, targets in grouped.items()}
+            slots['subj'] = subj
+            opener = best_pattern.get("opener", "")
+            body = best_pattern["body_template"]
+            closer = best_pattern.get("closer", "")
+            try:
+                return (opener + body + closer).format(**slots)
+            except KeyError:
+                pass  # 句式缺 slot, 回退模板
 
         # ── ★ v3.6: 意图驱动的三层排序 ★ ──
         # Layer 1 (身份): IS_A, NOT_IS_A
