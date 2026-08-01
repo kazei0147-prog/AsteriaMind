@@ -414,7 +414,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     "你可以问我关于动物、植物、天文的问题，或者教我新知识。", "greeting", {})
 
         if ci.mother.star_map:
-            for w in (2, 3):
+            for w in (3, 2):  # 先长后短: 霸王龙 > 霸王
                 for i in range(len(clean) - w + 1):
                     kw = clean[i:i+w]
                     r = ci.mother.star_map.conn.execute(
