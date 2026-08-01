@@ -413,6 +413,17 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             return ("你好！我是 AsteriaMind——一个基于认知星图和能量扩散的学习系统。"
                     "你可以问我关于动物、植物、天文的问题，或者教我新知识。", "greeting", {})
 
+        # ★ v3.6: 词义查询 — 'X是什么意思' → 查 symbol_star ★
+        m = re.match(r'(.+?)是什么意思$', text)
+        if m and ci.mother.star_map:
+            word = m.group(1).strip()
+            rows = ci.mother.star_map.conn.execute(
+                "SELECT DISTINCT meaning FROM symbol_star WHERE symbol=? AND meaning!='' LIMIT 1",
+                (word,)).fetchone()
+            if rows:
+                return (f"「{word}」：{rows[0]}", "define", {})
+            return (f"🤔 我还没学过「{word}」的具体含义，你教教我？", "unknown", {})
+
         if ci.mother.star_map:
             for w in (3, 2):  # 先长后短: 霸王龙 > 霸王
                 for i in range(len(clean) - w + 1):
