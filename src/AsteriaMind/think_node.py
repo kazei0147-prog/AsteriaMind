@@ -116,9 +116,9 @@ class ThinkNode:
         return ActionPlan("SEARCH", "", search_query=clean)
 
     def _extract_subject(self, text: str) -> str:
-        """滑动窗口提取实体"""
+        """滑动窗口提取实体 (1-3字)"""
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
-        for w in (3, 2):
+        for w in (3, 2, 1):
             for i in range(len(clean) - w + 1):
                 kw = clean[i:i+w]
                 if kw in ('什么', '怎么', '哪里', '为什么', '是不是', '会不会'):
