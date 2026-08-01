@@ -456,19 +456,10 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     ci.mother.star_map.restore_energy(subj_candidate, e["target"], 0.03)
                 return (narrative, "narrative", {"subject": subj_candidate})
 
-        # 回退: 老管线
-        result = ci.process(text)
-        loop = ci.mother.loop(
-            result.get("semantic"), result.get("pragmatic"),
-            text, reflection_ctx or {})
-        reply = loop.get("reply", "?")
-        action = loop.get("action", "unknown")
-        cognitive = loop.get("cognitive", {})
-        # 携带反馈上下文
-        cognitive["reflection_ctx"] = loop.get("reflection_ctx", {})
-        cognitive["prev_feedback"] = loop.get("prev_feedback")
-        cognitive["was_correct_last"] = loop.get("was_correct_last")
-        return (reply, action, cognitive)
+        # 星图不认识 → 坦诚回答, 不再走老管线
+        return (f"🤔 我还没学过关于「{text[:10]}」的知识。"
+                f"你可以教我——比如 '野狗 是 犬科动物' 或 '野狗 吃 小型动物'。",
+                "unknown", {})
 
     def _process_legacy(self, text: str) -> tuple[str, str]:
         """命令路由: learnw / readcn / answer / 偏好教学"""
