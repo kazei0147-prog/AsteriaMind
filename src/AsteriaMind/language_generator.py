@@ -296,8 +296,8 @@ class LanguageGenerator:
         # ★ v3.6: 优先查真人说过的话 ★
         if self.star_map:
             trace = self.star_map.conn.execute(
-                "SELECT source_text FROM language_traces "
-                "WHERE source_text LIKE ? AND length(source_text) < 120 "
+                "SELECT sentence FROM language_traces "
+                "WHERE sentence LIKE ? AND length(sentence) < 120 "
                 "LIMIT 1", (f"%{subj}%",)).fetchone()
             if trace and len(trace[0]) > 20:
                 return trace[0]
