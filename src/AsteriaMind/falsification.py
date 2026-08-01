@@ -279,7 +279,7 @@ class SearxNGSearch:
                     title="需安装 requests", snippet="pip install requests", source_credibility=0)]
         try:
             url = f"{self.base_url}/search?q={quote(query)}&format=json"
-            resp = self.session.get(url, timeout=10)
+            resp = self.session.get(url, timeout=20)
             data = resp.json()
             results = []
             for r in list(data.get('results', []))[:max_results]:

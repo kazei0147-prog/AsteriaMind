@@ -451,7 +451,14 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     ci.mother.star_map.restore_energy(subj_candidate, e["target"], 0.03)
                 return (narrative, "narrative", {"subject": subj_candidate})
 
-        # 星图不认识 → 坦诚回答, 不再走老管线
+        # 星图不认识 → 先上网查, 查不到再请用户教
+        if ci.active_learner and ci.active_learner.web_search:
+            try:
+                result = ci.active_learner.learn_word(text.strip())
+                if result.get("known") and result.get("definition"):
+                    return (f"🔍 我查了一下——{result['definition'][:200]}", "search_learn", result)
+            except Exception:
+                pass
         return (f"🤔 我还没学过关于「{text[:10]}」的知识。"
                 f"你可以教我——比如 '野狗 是 犬科动物' 或 '野狗 吃 小型动物'。",
                 "unknown", {})
