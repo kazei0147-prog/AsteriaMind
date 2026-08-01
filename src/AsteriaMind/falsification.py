@@ -277,21 +277,37 @@ class SearxNGSearch:
         if not self.session:
             return [WebResult(query=query, url="",
                     title="需安装 requests", snippet="pip install requests", source_credibility=0)]
+        # ★ v3.6: 重试 + 降级 DDG
+        errors = []
+        for attempt, timeout in ((1, 25), (2, 30), (3, 35)):
+            try:
+                url = f"{self.base_url}/search?q={quote(query)}&format=json"
+                resp = self.session.get(url, timeout=timeout)
+                data = resp.json()
+                results = []
+                for r in list(data.get('results', []))[:max_results]:
+                    results.append(WebResult(
+                        query=query, url=r.get('url', ''),
+                        title=r.get('title', ''),
+                        snippet=r.get('content', r.get('snippet', '')),
+                        source_credibility=0.6))
+                if results: return results
+                errors.append("无结果")
+            except Exception as e:
+                errors.append(str(e)[:40])
+                continue
+        # 降级: DuckDuckGo lite
         try:
-            url = f"{self.base_url}/search?q={quote(query)}&format=json"
-            resp = self.session.get(url, timeout=20)
-            data = resp.json()
-            results = []
-            for r in list(data.get('results', []))[:max_results]:
-                results.append(WebResult(
-                    query=query,
-                    url=r.get('url', ''),
-                    title=r.get('title', ''),
-                    snippet=r.get('content', r.get('snippet', '')),
-                    source_credibility=0.6,  # 略高于 DDG
-                ))
-            return results if results else [WebResult(query=query, url="",
-                    title="无结果", snippet="SearXNG 返回空", source_credibility=0.0)]
+            import re as _re2
+            ddg_url = f"https://lite.duckduckgo.com/lite/?q={quote(query)}"
+            resp = self.session.get(ddg_url, timeout=25)
+            snippets = _re2.findall(r'rel="nofollow">(.*?)</a>', resp.text, _re2.DOTALL)
+            return [WebResult(query=query, url="", title="DDG降级",
+                    snippet=s[:200], source_credibility=0.3) for s in snippets[:3]]
+        except Exception:
+            pass
+        return [WebResult(query=query, url="",
+                title=f"搜索失败(3次)", snippet="; ".join(errors), source_credibility=0.0)]
         except Exception as e:
             return [WebResult(query=query, url="",
                     title="搜索失败", snippet=str(e)[:200], source_credibility=0.0)]

@@ -51,19 +51,23 @@ class OfflineLearner:
         result = {"proposals": 0, "winners": 0, "learned": 0, "skipped": 0}
         proposals = []
 
-        # ── 1. 从 ActiveInference 收集高不确定边 ──
-        if self.active_inference:
-            uncertain = self.active_inference.most_uncertain_edges(top_k=5)
-            for edge in uncertain:
-                proposals.append(ExplorationProposal(
-                    learner_id=f"ai_{edge['subj']}",
-                    query=f"{edge['subj']} {edge['pred']} {edge['obj']}",
-                    hypothesis=f"信念不确定 (uncertainty={edge['uncertainty']:.2f})",
-                    expected_value=min(1.0, edge.get("free_energy", 0.5)),
-                    cost=1.0 + edge["uncertainty"] * 3.0,
-                    uncertainty_source="sigma_high",
-                    track_record=0.5,
-                ))
+        # ── 1. 直接扫描星图中低置信/低权重的边 ──
+        low_conf = self.star_map.conn.execute(
+            "SELECT source, relation, target, confidence, energy FROM directed_edges "
+            "WHERE relation IN ('IS_A','CAN','HAS','EATS','LIVES_IN') "
+            "AND (confidence < 0.5 OR energy < 0.3) "
+            "ORDER BY confidence ASC, energy ASC LIMIT 8").fetchall()
+        for row in low_conf:
+            subj, rel, obj, conf, energy = row
+            proposals.append(ExplorationProposal(
+                learner_id=f"scan_{subj}",
+                query=f"{subj} {rel} {obj}",
+                hypothesis=f"边缘不牢 (conf={conf:.1f}, energy={energy:.1f})",
+                expected_value=max(0.3, 1.0 - conf),
+                cost=1.0 + (1.0 - conf) * 2.0,
+                uncertainty_source="low_conf",
+                track_record=0.3,
+            ))
 
         # ── 2. 从 DreamModule 收集假说 ──
         if self.dream_module:

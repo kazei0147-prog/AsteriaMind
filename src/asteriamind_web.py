@@ -424,13 +424,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                         if c and c[0] > 1:
                             last_subj = kw; break
                     if last_subj: break
-            # 元认知: 检测用户反馈
+            # 元认知: 检测用户反馈 → 策略评分
             if re.search(r'(说的对|正确|没错|是的|对呀)', text):
                 if ci.mother and hasattr(ci.mother, 'meta_cognition'):
-                    ci.mother.meta_cognition.learn_from_reflection("narrative", True)
-            elif re.search(r'(不对|错了|不是|不是这样|不对哦)', text):
+                    ci.mother.meta_cognition.learn_from_reflection(
+                        self._last_strategy, True)
+            elif re.search(r'(不对|错了|不是|不是���样|不对哦)', text):
                 if ci.mother and hasattr(ci.mother, 'meta_cognition'):
-                    ci.mother.meta_cognition.learn_from_reflection("narrative", False)
+                    ci.mother.meta_cognition.learn_from_reflection(
+                        self._last_strategy, False)
 
         # 代词解析: 你/它/这/那 → 解析为主语
         if text.strip() in ('它','她','他','这','那','它们','她们','他们'):
@@ -509,6 +511,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
             narrative = lg._compose_narrative(subj, act, [], intent=intent)
             if narrative:
+                self._last_strategy = plan.strategy
                 for e in edges[:3]:
                     ci.mother.star_map.restore_energy(subj, e["target"], 0.03)
                 # ★ v3.6: 自学习 — 每个成功回答更新自我认知 ★
