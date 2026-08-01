@@ -461,48 +461,56 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 return (f"「{word}」：{rows[0]}", "define", {})
             return (f"🤔 我还没学过「{word}」的具体含义，你教教我？", "unknown", {})
 
+        # ★ v3.6: ThinkNode — 问题理解 + 策略规划 ★
         if ci.mother.star_map:
-            for w in (3, 2):  # 先长后短: 霸王龙 > 霸王
-                for i in range(len(clean) - w + 1):
-                    kw = clean[i:i+w]
-                    r = ci.mother.star_map.conn.execute(
-                        "SELECT COUNT(*) FROM directed_edges WHERE source=? OR target=?",
-                        (kw, kw)).fetchone()
-                    if r and r[0] > 1:
-                        subj_candidate = kw; break
-                if subj_candidate: break
+            from AsteriaMind.think_node import ThinkNode
+            tn = ThinkNode(ci.mother.star_map)
+            plan = tn.plan(text, context or "")
 
-        if subj_candidate:
+            if plan.strategy == "CLARIFY":
+                return (f"🤔 「{text[:10]}」——我不太确定你指的是什么，能说具体一点吗？",
+                        "clarify", {})
+
+            if plan.strategy == "SEARCH":
+                if ci.active_learner and ci.active_learner.web_search:
+                    try:
+                        result = ci.active_learner.learn_word(plan.search_query)
+                        if result.get("known") and result.get("definition"):
+                            return (f"🔍 我查了一下——{result['definition'][:200]}",
+                                    "search_learn", result)
+                    except Exception:
+                        pass
+                return (f"🤔 我还没学过关于「{text[:10]}」的知识。"
+                        f"你可以教我——比如 '野狗 是 犬科动物' 或 '野狗 吃 小型动物'。",
+                        "unknown", {})
+
+            # DIRECT / REVERSE: 走叙事管线
             from AsteriaMind.language_generator import LanguageGenerator
             from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
+            subj = plan.subject
             intent = infer_intent(text)
             lg = LanguageGenerator(ci.mother.star_map)
-            edges = ci.mother.star_map.query_edges(subj_candidate, text,
-                                                       space="belief")
-            # ★ v3.6: 零边 → 反向推理 → "羽毛会飞吗" → 鸟有羽毛、鸟会飞 ★
+
+            if plan.strategy == "REVERSE":
+                # ThinkNode 已反推: 羽毛 → 鸟类, 直接用鸟类查
+                edges = ci.mother.star_map.query_edges(subj, text, space="belief")
+            else:
+                edges = ci.mother.star_map.query_edges(subj, text, space="belief")
+
             if not edges:
-                reasoned = ci.mother.star_map.reason_about(subj_candidate)
-                if reasoned:
-                    edges = [{"target": r["target"], "relation": r["relation"],
-                              "salience": r.get("energy", 0.5), "energy": r.get("energy", 0.5)}
-                             for r in reasoned[:5]]
+                return (f"🤔 关于「{subj}」，我知道的还不多。你能教教我吗？",
+                        "unknown", {})
+
             edges = apply_intent_weight(edges, intent)
             act = [{"node": e["target"], "energy": e["salience"],
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
-            narrative = lg._compose_narrative(subj_candidate, act, [], intent=intent)
+            narrative = lg._compose_narrative(subj, act, [], intent=intent)
             if narrative:
                 for e in edges[:3]:
-                    ci.mother.star_map.restore_energy(subj_candidate, e["target"], 0.03)
-                return (narrative, "narrative", {"subject": subj_candidate})
+                    ci.mother.star_map.restore_energy(subj, e["target"], 0.03)
+                return (narrative, "narrative", {"subject": subj})
 
-        # 星图不认识 → 先上网查, 查不到再请用户教
-        if ci.active_learner and ci.active_learner.web_search:
-            try:
-                result = ci.active_learner.learn_word(text.strip())
-                if result.get("known") and result.get("definition"):
-                    return (f"🔍 我查了一下——{result['definition'][:200]}", "search_learn", result)
-            except Exception:
-                pass
+        # 回退: 星图不可用
         return (f"🤔 我还没学过关于「{text[:10]}」的知识。"
                 f"你可以教我——比如 '野狗 是 犬科动物' 或 '野狗 吃 小型动物'。",
                 "unknown", {})
