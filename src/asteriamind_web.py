@@ -256,37 +256,23 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"reply": "请说点什么", "error": True})
                 return
 
-            # ── v3.3: 会话管理 + 反馈捕获 ──
+            # ── v3.6: 简化的会话管理 (旧反映射管线已退役) ──
             sid = self.client_address[0]
             now = time.time()
             session = self.SESSIONS.get(sid)
 
-            # 检查超时 → 结束旧会话, 生成评估
+            # 检查超时
             if session and (now - session.get("last_active", 0) > self.SESSION_TIMEOUT):
-                old_sid = session.get("session_id", "")
-                if old_sid:
-                    assessment = ci.end_reflection_session(old_sid)
-                    print(f"\n  📋 Session {old_sid} ended (timeout): "
-                          f"accuracy={assessment.get('accuracy',0):.0%} "
-                          f"exchanges={assessment.get('total_exchanges',0)}")
                 session = None
 
             # 新会话
             if not session:
-                reflector = ci.start_reflection_session()
                 session = {
-                    "session_id": reflector.session_id,
-                    "reflection_ctx": {},
+                    "session_id": str(int(now)),
                     "last_active": now,
                     "exchange_count": 0,
                 }
                 self.SESSIONS[sid] = session
-
-            # ── 反馈闭环: 用户本轮输入 → 对上轮回答的反馈 ──
-            prev_ctx = session.get("reflection_ctx", {})
-            if prev_ctx and session.get("exchange_count", 0) > 0:
-                fb_result = ci.capture_feedback(text, session["session_id"])
-                prev_ctx["pending_feedback"] = fb_result
 
             # ── 持久对话上下文 ──
             topic = self._extract_topic(text)
@@ -294,10 +280,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             context_str = CONV_MEMORY.get_context_string(sid, text)
 
             reply, action, cognitive = self._process(
-                text, context=context_str, reflection_ctx=prev_ctx)
+                text, context=context_str)
 
-            # ── 更新会��状态 ──
-            session["reflection_ctx"] = cognitive.get("reflection_ctx", {})
+            # ── 更新会话 ──
             session["last_active"] = now
             session["exchange_count"] += 1
 
@@ -379,8 +364,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 return w
         return ""
 
-    def _process(self, text: str, context: str = None,
-                 reflection_ctx: dict = None) -> tuple[str, str, dict]:
+    def _process(self, text: str, context: str = None) -> tuple[str, str, dict]:
         """
         ── Cognitive Interface Layer ──
         Semantic → Pragmatic → Action → Mother v3 → 回复
