@@ -620,6 +620,10 @@ class CognitiveInterface:
         self.cognitive_star_map = CognitiveStarMap(
             "asteriamind.db", co_db="asteriamind_fat.db")
 
+        # CriticModule: 内部批判者 — 熵态不确定性检测
+        from AsteriaMind.critic_module import CriticModule
+        self.critic = CriticModule(self.cognitive_star_map)
+
         # ActiveLearner: 在线学习 — 知识空白时对外查询
         from AsteriaMind.active_learner import ActiveLearner
         self.active_learner = ActiveLearner(
@@ -641,6 +645,7 @@ class CognitiveInterface:
             active_inference=self.mother.active_inference,
             dream_module=self.dream_module,
             active_learner=self.active_learner,
+            critic=self.critic,
         )
 
         # ── v3.3: 反映射闭环 ──

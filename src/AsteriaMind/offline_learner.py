@@ -29,11 +29,12 @@ class OfflineLearner:
 
     def __init__(self, star_map=None, active_inference=None,
                  dream_module=None, active_learner=None,
-                 budget_contest=None):
+                 budget_contest=None, critic=None):
         self.star_map = star_map
         self.active_inference = active_inference
         self.dream_module = dream_module
         self.active_learner = active_learner
+        self.critic = critic
         self.budget_contest = budget_contest or BudgetContest(
             max_winners=2, monopoly_limit=3, random_explore_chance=0.10
         )
@@ -68,6 +69,19 @@ class OfflineLearner:
                 uncertainty_source="low_conf",
                 track_record=0.3,
             ))
+
+        # ── 1.5 ★ v3.6: 批判者 — 高熵实体优先学 ──
+        if self.critic:
+            for t in self.critic.learn_targets(top_k=5):
+                proposals.append(ExplorationProposal(
+                    learner_id=f"critic_{t['entity']}",
+                    query=f"{t['entity']} 是什么",
+                    hypothesis=f"熵态驱动 H={t['entropy']:.2f} (知识模糊)",
+                    expected_value=t["entropy"],
+                    cost=1.0,
+                    uncertainty_source="high_entropy",
+                    track_record=0.5,
+                ))
 
         # ── 2. 从 DreamModule 收集假说 ──
         if self.dream_module:

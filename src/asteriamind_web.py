@@ -540,6 +540,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             act = [{"node": e["target"], "energy": e["salience"],
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
             narrative = lg._compose_narrative(subj, act, [], intent=intent)
+            # ★ v3.6: 批判者 — 熵高时诚实标注不确定性 ★
+            if narrative and hasattr(ci, 'critic'):
+                crit = ci.critic.check(subj)
+                if crit:
+                    narrative = crit["preface"] + narrative
             if narrative:
                 self._last_strategy = plan.strategy
                 for e in edges[:3]:
