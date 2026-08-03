@@ -389,22 +389,35 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         # DEBUG: 追踪入口
         with open("D:/AM/_proc_debug.txt", "a") as _f:
             _f.write(f"PROC: {text!r}\n")
-        # ★ v3.6: 自指拦截 — 所有"你"开头都转"我" ★
+        # ★ v3.6: 自指拦截 — 只对"你是谁/你会什么"这类自我认知问句 ★
+        #   注意: "你知道铁是什么吗" 不是自指, 是问铁! 三种"你"要区分:
+        #   ① 自我认知: 你是谁/你叫什么/你会什么/你能做什么 → self_ref
+        #   ② 祈使:     你帮我查X/你能查一下X → 掉进动作原语
+        #   ③ 指向提问: 你知道X吗/你觉得X吗 → 剥掉框架, 查X
         if text.startswith('你') and len(text) >= 3:
-            text = re.sub(r'^你', '我', text)
-            if ci.mother and ci.mother.star_map:
-                from AsteriaMind.language_generator import LanguageGenerator
-                from AsteriaMind.intent_layer import apply_intent_weight
-                intent = ci.intent_learner.predict(text) if hasattr(ci, 'intent_learner') else "ASK"
-                lg = LanguageGenerator(ci.mother.star_map)
-                edges = ci.mother.star_map.query_edges("我", text, space="belief")
-                if edges:
-                    edges = apply_intent_weight(edges, intent)
-                    act = [{"node": e["target"], "energy": e["salience"],
-                            "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
-                    narrative = lg._compose_narrative("我", act, [], intent=intent)
-                    if narrative:
-                        return (narrative, "self_ref", {"subject": "我"})
+            if re.match(r'^你(?:是|叫)', text) or \
+               re.match(r'^你(?:会|能|有|可以做|擅长)(?:什么|哪些|啥|什么能力|什么本事|做什么|哪些事)', text):
+                # ① 真自指: 你是谁/你会什么/你能做什么
+                text = re.sub(r'^你', '我', text)
+                if ci.mother and ci.mother.star_map:
+                    from AsteriaMind.language_generator import LanguageGenerator
+                    from AsteriaMind.intent_layer import apply_intent_weight
+                    intent = ci.intent_learner.predict(text) if hasattr(ci, 'intent_learner') else "ASK"
+                    lg = LanguageGenerator(ci.mother.star_map)
+                    edges = ci.mother.star_map.query_edges("我", text, space="belief")
+                    if edges:
+                        edges = apply_intent_weight(edges, intent)
+                        act = [{"node": e["target"], "energy": e["salience"],
+                                "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
+                        narrative = lg._compose_narrative("我", act, [], intent=intent)
+                        if narrative:
+                            return (narrative, "self_ref", {"subject": "我"})
+            elif re.match(r'^你知道', text):
+                # ③ "你知道X吗" → 剥框架, 直接查 X
+                m = re.match(r'^你知道(.+?)(?:吗|么|不)?$', text)
+                if m:
+                    text = m.group(1)
+                    # 掉进正常管线 (ThinkNode 处理)
 
         # 命令: learnw/readcn/answer/偏好教学 (保留)
         if text.startswith(('learnw ', 'readcn ', 'answer ', '以后我')):

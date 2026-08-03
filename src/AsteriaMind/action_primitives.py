@@ -58,9 +58,11 @@ class ActionPrimitives:
             if m:
                 verb = m.group(1)
                 target = m.group(2).strip()
-                # 去修饰语
+                # 去修饰语 + 疑问词
                 for mod in _MODIFIERS:
                     target = target.replace(mod, '')
+                for junk in ('吗', '么', '呢', '吧', '呀'):
+                    target = target.replace(junk, '')
                 target = target.strip(' ，。？！：:')
                 return verb, target
         return None, text
