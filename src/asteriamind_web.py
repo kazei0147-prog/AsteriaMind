@@ -519,6 +519,14 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                         "clarify", {})
 
             if plan.strategy == "SEARCH":
+                # ★ v3.6: 软证据 — 先问联想, 有相关词就不无脑搜索 ★
+                soft = ci.mother.star_map.soft_evidence(plan.search_query, top_k=5)
+                if soft:
+                    relates = "、".join(f"「{s['related']}」" for s in soft[:4])
+                    reply = (f"我还不太确定「{plan.search_query[:8]}」具体是什么，"
+                             f"但根据我读过的内容，它经常和 {relates} 一起出现。"
+                             f"要我联网查一下吗？")
+                    return (reply, "soft_association", {"evidence": soft})
                 if ci.active_learner and ci.active_learner.web_search:
                     try:
                         result = ci.active_learner.learn_word(plan.search_query)

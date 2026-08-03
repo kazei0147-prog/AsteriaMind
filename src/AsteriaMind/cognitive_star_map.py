@@ -930,6 +930,35 @@ class CognitiveStarMap:
             pass
         return degree
 
+    def soft_evidence(self, word: str, top_k: int = 5) -> list[dict]:
+        """★ v3.6: 软证据 — co_text 联想作为回答证据源
+
+        命名边查不到时, 用统计共现给出有依据的相关词:
+          查 word 的 top co_text 邻居, 返回 {word, energy, related}
+        让回答不无脑搜索, 而是"我读过的东西里它们常一起出现"
+        """
+        if not word:
+            return []
+        # 扩展查询词: 取 1-4 字窗口, 避免整句查不到
+        clean = re.sub(r'[^\u4e00-\u9fff]', '', word)
+        candidates = []
+        for w in (clean, clean[-2:] if len(clean) >= 2 else clean,
+                  clean[:2] if len(clean) >= 2 else clean):
+            if not w or len(w) < 2:
+                continue
+            rows = self.conn.execute(
+                "SELECT target, energy FROM directed_edges "
+                "WHERE source=? AND relation='co_text' AND length(target) >= 2 "
+                "ORDER BY energy DESC LIMIT ?", (w, top_k)).fetchall()
+            for t, e in rows:
+                candidates.append({"word": w, "related": t, "energy": round(e, 2)})
+        # 去重 (同相关词保留最高能量)
+        seen = {}
+        for c in candidates:
+            if c["related"] not in seen or c["energy"] > seen[c["related"]]["energy"]:
+                seen[c["related"]] = c
+        return sorted(seen.values(), key=lambda x: -x["energy"])[:top_k]
+
     def spread_write(self, text: str, energy_boost: float = 1.0):
         """
         文本 → 词对共现 → co_text 有向边。
