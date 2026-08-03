@@ -484,7 +484,15 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if ci.mother.star_map:
             from AsteriaMind.think_node import ThinkNode
             tn = ThinkNode(ci.mother.star_map)
+            # 注入持久化的短期记忆 (跨请求存活)
+            if not hasattr(self, '_last_subj'): self._last_subj = ""
+            if not hasattr(self, '_last_rel'): self._last_rel = ""
+            tn.last_subject = self._last_subj
+            tn.last_relation = self._last_rel
             plan = tn.plan(text, context or "")
+            if plan.subject:
+                self._last_subj = plan.subject
+                self._last_rel = plan.relation_hints[0] if plan.relation_hints else ""
 
             if plan.strategy == "CLARIFY":
                 q = plan.search_query or text

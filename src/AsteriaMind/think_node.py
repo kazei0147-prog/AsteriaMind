@@ -75,6 +75,17 @@ class ThinkNode:
         """
         clean = text.strip()
 
+        # ── 0.5. 从 context 读"你"指代谁 ──
+        if context and not subject:
+            # 用户的上一句话
+            um = re.search(r'\[user\]:\s*(.+)', context)
+            if um:
+                prev_q = um.group(1)
+                prev_subj = self._extract_subject(re.sub(r'[^\u4e00-\u9fff]', '', prev_q))
+                if prev_subj:
+                    self.last_subject = prev_subj
+                    self.last_relation = _infer_relation(prev_q)
+
         # ── 0. 代词 + 追问检测 ──
         if clean in ('它', '她', '他', '这', '那', '它们', '他们', '她们'):
             if self.last_subject:
