@@ -255,10 +255,10 @@ class CognitiveStarMap:
     """统一星图——共现向量 + 语言涌现 + 能量代谢"""
 
     def __init__(self, db_path: str = "asteriamind.db", co_db: str = ""):
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.co_conn = None
         if co_db and os.path.exists(co_db):
-            self.co_conn = sqlite3.connect(co_db)
+            self.co_conn = sqlite3.connect(co_db, check_same_thread=False)
             self.co_conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._ensure_table()
