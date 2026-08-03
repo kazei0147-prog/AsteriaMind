@@ -930,6 +930,12 @@ class CognitiveStarMap:
             pass
         return degree
 
+    # 截断词尾: 滑动窗口碎片以这些字结尾的概率高
+    _FRAG_TAILS = frozenset(
+        '的 了 是 在 上 中 下 有 和 与 或 被 把 让 对 从 向 为 以 之 也 很 会 能 不'
+        '就 都 还 又 再 更 最 太 很 都 并 但 而 及 若 虽 然 于 其 之 所 也 呢 吗 吧 啊'.split()
+    )
+
     def soft_evidence(self, word: str, top_k: int = 5) -> list[dict]:
         """★ v3.6: 软证据 — co_text 联想作为回答证据源
 
@@ -939,18 +945,30 @@ class CognitiveStarMap:
         """
         if not word:
             return []
-        # 扩展查询词: 取 1-4 字窗口, 避免整句查不到
+        # 提纯查询词: 去问句虚词, 取最长名词片段
         clean = re.sub(r'[^\u4e00-\u9fff]', '', word)
+        for junk in ('是什么', '是啥', '什么', '怎么', '如何', '为什么',
+                     '吗', '呢', '吧', '的', '了'):
+            clean = clean.replace(junk, '')
+        query_words = []
+        if len(clean) >= 2:
+            query_words.append(clean)
+        if len(clean) >= 3:
+            query_words.append(clean[-2:])
+        query_words = list(dict.fromkeys(query_words))  # 去重保序
+
         candidates = []
-        for w in (clean, clean[-2:] if len(clean) >= 2 else clean,
-                  clean[:2] if len(clean) >= 2 else clean):
-            if not w or len(w) < 2:
-                continue
+        for w in query_words[:3]:
             rows = self.conn.execute(
                 "SELECT target, energy FROM directed_edges "
                 "WHERE source=? AND relation='co_text' AND length(target) >= 2 "
-                "ORDER BY energy DESC LIMIT ?", (w, top_k)).fetchall()
+                "ORDER BY energy DESC LIMIT ?", (w, top_k * 6)).fetchall()
             for t, e in rows:
+                # 过滤截断碎片: 以功能字结尾 → 大概率是滑动窗口切碎的
+                if t[-1] in self._FRAG_TAILS:
+                    continue
+                if len(t) >= 4 and any(x in t for x in ('的', '是', '了')):
+                    continue
                 candidates.append({"word": w, "related": t, "energy": round(e, 2)})
         # 去重 (同相关词保留最高能量)
         seen = {}
