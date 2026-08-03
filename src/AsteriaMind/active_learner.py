@@ -70,21 +70,29 @@ class ActiveLearner:
         # 3. 搜网络
         if self.web_search:
             try:
-                search_result = self.web_search.search(f"{word} 定义", max_results=2)
+                search_result = self.web_search.search(f"{word} 定义", max_results=4)
+                # ★ v3.6: 相关性校验 — snippet/title 必须包含查询词, 否则是垃圾结果
                 for r in search_result:
-                    if r.snippet and "未连接" not in r.snippet:
-                        result["known"] = True
-                        result["definition"] = r.snippet[:200]
-                        result["confidence"] = 0.5
-                        result["source"] = "web_search"
-                        # 存入 KG
-                        if self.kg:
-                            self.kg.add(word, "MEANS", r.snippet[:100],
-                                       confidence=0.5, source="web_search")
-                        # ★ v3.5: 能量扩散写入 — 搜索结果直接增强共现网
-                        if self.star_map:
-                            self.star_map.spread_write(r.snippet)
-                        return result
+                    if not r.snippet or "未连接" in r.snippet:
+                        continue
+                    # 查询词相关性: title 或 snippet 含 word 或其 2 字片段
+                    hit = word in (r.title + r.snippet)
+                    if not hit and len(word) >= 2:
+                        hit = word[:2] in (r.title + r.snippet)
+                    if not hit:
+                        continue  # 电视剧/广告 → 拒绝
+                    result["known"] = True
+                    result["definition"] = r.snippet[:200]
+                    result["confidence"] = 0.5
+                    result["source"] = "web_search"
+                    # 存入 KG
+                    if self.kg:
+                        self.kg.add(word, "MEANS", r.snippet[:100],
+                                   confidence=0.5, source="web_search")
+                    # ★ v3.5: 能量扩散写入 — 搜索结果直接增强共现网
+                    if self.star_map:
+                        self.star_map.spread_write(r.snippet)
+                    return result
             except Exception:
                 pass
 
