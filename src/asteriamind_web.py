@@ -374,6 +374,23 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         v3.3: 传入 reflection_ctx 支持反馈闭环
         """
+        # ★ v3.6: 自指拦截 — 必须在所有逻辑之前 ★
+        if re.match(r'^(你会|你能|你有什么|你是什么|你是谁|你不会|你能不能)', text):
+            text = re.sub(r'^你', '我', text)
+            if ci.mother and ci.mother.star_map:
+                from AsteriaMind.language_generator import LanguageGenerator
+                from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
+                intent = infer_intent(text)
+                lg = LanguageGenerator(ci.mother.star_map)
+                edges = ci.mother.star_map.query_edges("我", text, space="belief")
+                if edges:
+                    edges = apply_intent_weight(edges, intent)
+                    act = [{"node": e["target"], "energy": e["salience"],
+                            "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
+                    narrative = lg._compose_narrative("我", act, [], intent=intent)
+                    if narrative:
+                        return (narrative, "self_ref", {"subject": "我"})
+
         # 命令: learnw/readcn/answer/偏好教学 (保留)
         if text.startswith(('learnw ', 'readcn ', 'answer ', '以后我')):
             return self._process_legacy(text)
@@ -440,9 +457,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 text = last_subj
             else:
                 return ("请问你指的是？", "clarify", {})
-        # ★ 自指: "你"开头的问句 → "我"实体 (AM 认识自己) ★
-        if re.match(r'^(你会|你能|你有什么|你是什么|你是谁|你不会|你能不能)', text):
-            text = re.sub(r'^你', '我', text)
         # 追问: "还有呢"/"为什么"/"那..." → 保持主语
         if re.match(r'^(还有|为什么|那|那么|这个|那个|这些)', text) and last_subj:
             text = f"{last_subj}{text}"
@@ -471,8 +485,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             from AsteriaMind.think_node import ThinkNode
             tn = ThinkNode(ci.mother.star_map)
             plan = tn.plan(text, context or "")
-            with open("D:/AM/tn_trace.log", "a") as f:
-                f.write(f"TN: text={text[:30]!r} → {plan}\n")
 
             if plan.strategy == "CLARIFY":
                 return (f"🤔 「{text[:10]}」——我不太确定你指的是什么，能说具体一点吗？",
