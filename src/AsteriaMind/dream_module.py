@@ -58,6 +58,10 @@ class DreamModule:
         anomalies = self._dream_anomalies()
         new_hypotheses.extend(anomalies)
 
+        # 4. ★ v3.6: 跨库联想 — fat.db co_text 涌现 → 白盒筛选 ★
+        co_hypotheses = self._dream_from_cotext()
+        new_hypotheses.extend(co_hypotheses)
+
         # ── v3.6: 本周期内去重 ──
         seen = set()
         deduped = []
@@ -212,6 +216,32 @@ class DreamModule:
         pending = [h for h in self.hypothesis_pool if h.get("status") == "unverified"]
         pending.sort(key=lambda h: h["confidence"], reverse=True)
         return pending[:limit]
+
+    def _dream_from_cotext(self) -> list[dict]:
+        """★ v3.6: 从 fat.db 的 co_text 涌现假说 → 白盒筛选"""
+        if not self.star_map.co_conn:
+            return []
+        results = []
+        # 找 co_text 中高频词对，且主词在命名空间已有边
+        for row in self.star_map.co_conn.execute(
+            "SELECT source, target, SUM(energy) as e FROM directed_edges "
+            "WHERE relation='co_text' AND source IN (SELECT DISTINCT source FROM directed_edges WHERE relation IN ('IS_A','CAN','NOT_CAN')) "
+            "GROUP BY source, target HAVING e > 5.0 ORDER BY e DESC LIMIT 15"
+        ).fetchall():
+            s, t, e = row
+            # 白盒筛选: 目标词在命名空间没有出现过 → 可能的新知识
+            exists = self.star_map.conn.execute(
+                "SELECT 1 FROM directed_edges WHERE source=? AND target=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS') LIMIT 1",
+                (s, t)).fetchone()
+            if not exists:
+                results.append({
+                    "type": "co_text_hypothesis",
+                    "subject": s, "predicate": "HAS", "object": t,
+                    "confidence": min(0.6, e / 30.0),
+                    "reasoning": f"co_text co-occurrence energy={e:.1f}, no existing named edge",
+                    "energy": e,
+                })
+        return results
 
     def verify_hypothesis(self, idx: int, accepted: bool) -> None:
         """

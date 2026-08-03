@@ -617,7 +617,8 @@ class CognitiveInterface:
         self.action = ActionIntentEngine()
         # StarMap: 认知空间 (替代硬标签符号)
         from AsteriaMind.cognitive_star_map import CognitiveStarMap
-        self.cognitive_star_map = CognitiveStarMap()
+        self.cognitive_star_map = CognitiveStarMap(
+            "asteriamind.db", co_db="asteriamind_fat.db")
 
         # ActiveLearner: 在线学习 — 知识空白时对外查询
         from AsteriaMind.active_learner import ActiveLearner

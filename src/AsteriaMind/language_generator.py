@@ -184,14 +184,21 @@ class LanguageGenerator:
     def _match_pattern(self, seen: list[str], intent: str) -> dict | None:
         """从 lang_patterns 匹配最合适的句式, 返回 {opener, body_template, closer} 或 None"""
         if not self.star_map: return None
-        # 意图 → confidence_bucket 映射
         bucket = {"CORRECT": "mid", "EXPLAIN": "mid", "ASK": "mid",
                   "CONFIRM": "high", "COMPARE": "mid"}.get(intent, "mid")
+        # 第一轮: 严格匹配 intent
         rows = self.star_map.conn.execute(
             "SELECT opener, body_template, closer, count FROM lang_patterns "
             "WHERE action_type='info_request' AND confidence_bucket=? AND source=? "
             "ORDER BY count DESC LIMIT 3",
             (bucket, intent.lower())).fetchall()
+        # 第二轮: 放宽到任何 source (auto 学到的句式)
+        if not rows:
+            rows = self.star_map.conn.execute(
+                "SELECT opener, body_template, closer, count FROM lang_patterns "
+                "WHERE action_type='info_request' AND confidence_bucket=? "
+                "ORDER BY count DESC LIMIT 5",
+                (bucket,)).fetchall()
         if rows:
             best = rows[0]
             return {"opener": best[0], "body_template": best[1], "closer": best[2]}

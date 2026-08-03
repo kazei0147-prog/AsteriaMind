@@ -5,7 +5,7 @@ v3: 统计共近代替代字符哈希。
 认知痕迹 → 自动构建共现矩阵 → 稀疏向量 → 相似检索。
 认知 + 语言痕迹共存于同一空间，同时检索。
 """
-import time, math, sqlite3, struct, re
+import time, math, sqlite3, struct, re, os
 from typing import Optional
 
 
@@ -254,8 +254,12 @@ def _sparse_cosine(v1: dict[str, float], v2: dict[str, float]) -> float:
 class CognitiveStarMap:
     """统一星图——共现向量 + 语言涌现 + 能量代谢"""
 
-    def __init__(self, db_path: str = "asteriamind.db"):
+    def __init__(self, db_path: str = "asteriamind.db", co_db: str = ""):
         self.conn = sqlite3.connect(db_path)
+        self.co_conn = None
+        if co_db and os.path.exists(co_db):
+            self.co_conn = sqlite3.connect(co_db)
+            self.co_conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._ensure_table()
         _build_cooccur_from_traces(self.conn)
