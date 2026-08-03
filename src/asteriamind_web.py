@@ -497,8 +497,12 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             lg = LanguageGenerator(ci.mother.star_map)
 
             if plan.strategy == "REVERSE":
-                # ThinkNode 已反推: 羽毛 → 鸟类, 直接用鸟类查
+                # ThinkNode 已反推: 羽毛 → 鸟类, 用鸟类查, 但加权匹配原问题
                 edges = ci.mother.star_map.query_edges(subj, text, space="belief")
+                # ★ CHAIN-4: 原问题关系高权重 → "会飞吗" → CAN 边加权 ★
+                for e in edges:
+                    if e["relation"] == plan.relation_hints[0]:
+                        e["salience"] *= 2.0; e["energy"] *= 1.5
             else:
                 edges = ci.mother.star_map.query_edges(subj, text, space="belief")
 

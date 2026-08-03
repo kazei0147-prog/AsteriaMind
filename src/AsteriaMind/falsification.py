@@ -308,9 +308,6 @@ class SearxNGSearch:
             pass
         return [WebResult(query=query, url="",
                 title=f"搜索失败(3次)", snippet="; ".join(errors), source_credibility=0.0)]
-        except Exception as e:
-            return [WebResult(query=query, url="",
-                    title="搜索失败", snippet=str(e)[:200], source_credibility=0.0)]
 
     def __init__(self, search_fn=None):
         self.search_fn = search_fn or _default_web_search
