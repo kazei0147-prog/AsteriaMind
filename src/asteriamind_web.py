@@ -71,6 +71,13 @@ else:
     web_search = WebSearchInterface()
 ci = CognitiveInterface(kg, db, web_search)
 
+# ★ 跨请求状态 (HTTP 每请求新建 Handler, 实例状态会丢, 必须用全局)
+_last_strategy = ""
+_last_text = ""
+_last_intent = ""
+_last_subj = ""
+_last_rel = ""
+
 # 从 DB 恢复已有知识
 for r in db.query():
     kg.add(r["subject"], r["predicate"], r["object"], confidence=r["confidence"])
@@ -441,19 +448,20 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                         if c and c[0] > 1:
                             last_subj = kw; break
                     if last_subj: break
-            # 元认知: 检测用户反馈 → 策略评分 + 意图学习
-            if re.search(r'(说的对|正确|没错|是的|对呀)', text):
-                if ci.mother and hasattr(ci.mother, 'meta_cognition'):
-                    ci.mother.meta_cognition.learn_from_reflection(
-                        self._last_strategy, True)
-                if hasattr(ci, 'intent_learner') and self._last_text and self._last_intent:
-                    ci.intent_learner.learn(self._last_text, self._last_intent, True)
-            elif re.search(r'(不对|错了|不是|不是���样|不对哦)', text):
-                if ci.mother and hasattr(ci.mother, 'meta_cognition'):
-                    ci.mother.meta_cognition.learn_from_reflection(
-                        self._last_strategy, False)
-                if hasattr(ci, 'intent_learner') and self._last_text and self._last_intent:
-                    ci.intent_learner.learn(self._last_text, self._last_intent, False)
+        # 元认知: 检测用户反馈 → 策略评分 + 意图学习
+        global _last_strategy, _last_text, _last_intent
+        if re.search(r'(说的对|正确|没错|是的|对呀)', text):
+            if ci.mother and hasattr(ci.mother, 'meta_cognition'):
+                ci.mother.meta_cognition.learn_from_reflection(
+                    _last_strategy, True)
+            if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
+                ci.intent_learner.learn(_last_text, _last_intent, True)
+        elif re.search(r'(不对|错了|不是|不是这样|不对哦)', text):
+            if ci.mother and hasattr(ci.mother, 'meta_cognition'):
+                ci.mother.meta_cognition.learn_from_reflection(
+                    _last_strategy, False)
+            if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
+                ci.intent_learner.learn(_last_text, _last_intent, False)
 
         # 代词解析: 你/它/这/那 → 解析为主语
         if text.strip() in ('它','她','他','这','那','它们','她们','他们'):
@@ -488,15 +496,14 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if ci.mother.star_map:
             from AsteriaMind.think_node import ThinkNode
             tn = ThinkNode(ci.mother.star_map)
-            # 注入持久化的短期记忆 (跨请求存活)
-            if not hasattr(self, '_last_subj'): self._last_subj = ""
-            if not hasattr(self, '_last_rel'): self._last_rel = ""
-            tn.last_subject = self._last_subj
-            tn.last_relation = self._last_rel
+            # 注入持久化的短期记忆 (跨请求存活 — 模块级全局)
+            global _last_subj, _last_rel
+            tn.last_subject = _last_subj
+            tn.last_relation = _last_rel
             plan = tn.plan(text, context or "")
             if plan.subject:
-                self._last_subj = plan.subject
-                self._last_rel = plan.relation_hints[0] if plan.relation_hints else ""
+                _last_subj = plan.subject
+                _last_rel = plan.relation_hints[0] if plan.relation_hints else ""
 
             if plan.strategy == "CLARIFY":
                 q = plan.search_query or text
@@ -550,9 +557,10 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if crit:
                     narrative = crit["preface"] + narrative
             if narrative:
-                self._last_strategy = plan.strategy
-                self._last_text = text
-                self._last_intent = intent
+                global _last_strategy, _last_text, _last_intent
+                _last_strategy = plan.strategy
+                _last_text = text
+                _last_intent = intent
                 for e in edges[:3]:
                     ci.mother.star_map.restore_energy(subj, e["target"], 0.03)
                 # ★ v3.6: 自学习 — 每个成功回答更新自我认知 ★
