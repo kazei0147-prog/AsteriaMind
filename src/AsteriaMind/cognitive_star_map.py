@@ -610,12 +610,13 @@ class CognitiveStarMap:
         return results
 
     def query_edges(self, subj: str, query: str, top_k: int = 8,
-                     space: str = "belief") -> list[dict]:
+                     space: str = "belief", probabilistic: bool = False) -> list[dict]:
         """
         ★ v3.6: 认知分层查询
         space="belief":     命名关系 (IS_A/CAN/NOT_CAN/...) — 用于叙事
         space="association": co_text 边 — 用于激活扩散
-        space="all":        不过滤
+        space="all":        不过滤 — 单图联合分布
+        probabilistic=True: 返回归一化概率分布 (思维层)
         """
         from collections import defaultdict
 
@@ -637,7 +638,7 @@ class CognitiveStarMap:
             (subj,)):
             target, rel, weight, conf, edge_energy = row
 
-            # ★ v3.6: 空间过滤
+            # ★ v3.6: 空间过滤 (合并后单图, 全看得到)
             NAMED_RELATIONS = {
                 "NOT_CAN", "NOT_IS_A", "IS_A", "CAN",
                 "HAS", "EATS", "LIVES_IN", "ORBITS",
@@ -682,6 +683,11 @@ class CognitiveStarMap:
             if e["target"] not in seen:
                 seen.add(e["target"])
                 result.append(e)
+        # ★ v3.6: 概率化 — salience 归一化为 P(边|subj,query)
+        if probabilistic and result:
+            total = sum(max(e["salience"], 1e-6) for e in result)
+            for e in result:
+                e["probability"] = round(e["salience"] / total, 4)
         return result[:top_k]
 
     def store(self, subj: str, pred: str, obj: str,
