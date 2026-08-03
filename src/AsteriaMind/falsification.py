@@ -286,13 +286,21 @@ class SearxNGSearch:
                 data = resp.json()
                 results = []
                 for r in list(data.get('results', []))[:max_results]:
+                    snippet = r.get('content', r.get('snippet', ''))
+                    title = r.get('title', '')
                     results.append(WebResult(
                         query=query, url=r.get('url', ''),
-                        title=r.get('title', ''),
-                        snippet=r.get('content', r.get('snippet', '')),
+                        title=title, snippet=snippet,
                         source_credibility=0.6))
-                if results: return results
-                errors.append("无结果")
+                # ★ 去噪: 结果必须包含至少 1 个查询词, 否则丢弃
+                if results:
+                    rel = sum(
+                        1 for r in results
+                        if any(w in (r.title + r.snippet) for w in query[:6])
+                    )
+                    if rel >= 1:
+                        return results
+                    errors.append(f"不相关({rel}/{len(results)})")
             except Exception as e:
                 errors.append(str(e)[:40])
                 continue
