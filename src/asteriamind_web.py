@@ -381,6 +381,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         v3.3: 传入 reflection_ctx 支持反馈闭环
         """
+        # DEBUG: 追踪入口
+        with open("D:/AM/_proc_debug.txt", "a") as _f:
+            _f.write(f"PROC: {text!r}\n")
         # ★ v3.6: 自指拦截 — 所有"你"开头都转"我" ★
         if text.startswith('你') and len(text) >= 3:
             text = re.sub(r'^你', '我', text)
@@ -450,18 +453,20 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     if last_subj: break
         # 元认知: 检测用户反馈 → 策略评分 + 意图学习
         global _last_strategy, _last_text, _last_intent
-        if re.search(r'(说的对|正确|没错|是的|对呀)', text):
-            if ci.mother and hasattr(ci.mother, 'meta_cognition'):
-                ci.mother.meta_cognition.learn_from_reflection(
-                    _last_strategy, True)
-            if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
-                ci.intent_learner.learn(_last_text, _last_intent, True)
-        elif re.search(r'(不对|错了|不是|不是这样|不对哦)', text):
+        if re.search(r'(不对|错了|不是|不是这样|不对哦|错啦)', text):
             if ci.mother and hasattr(ci.mother, 'meta_cognition'):
                 ci.mother.meta_cognition.learn_from_reflection(
                     _last_strategy, False)
             if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
                 ci.intent_learner.learn(_last_text, _last_intent, False)
+            return ("🙏 明白了，我记下了，下次注意。", "feedback_negative", {})
+        elif re.search(r'(说的对|正确|没错|是的|对呀|对的|说得对|没错没错|是的是的)', text):
+            if ci.mother and hasattr(ci.mother, 'meta_cognition'):
+                ci.mother.meta_cognition.learn_from_reflection(
+                    _last_strategy, True)
+            if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
+                ci.intent_learner.learn(_last_text, _last_intent, True)
+            return ("😊 收到，我会记住的。", "feedback_positive", {})
 
         # 代词解析: 你/它/这/那 → 解析为主语
         if text.strip() in ('它','她','他','这','那','它们','她们','他们'):
@@ -557,7 +562,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                 if crit:
                     narrative = crit["preface"] + narrative
             if narrative:
-                global _last_strategy, _last_text, _last_intent
                 _last_strategy = plan.strategy
                 _last_text = text
                 _last_intent = intent

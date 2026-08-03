@@ -74,6 +74,7 @@ class ThinkNode:
         输出: ActionPlan — 告诉执行层: 找什么、怎么找
         """
         clean = text.strip()
+        subject = ""  # ★ 先初始化, 供 context 块引用 ★
 
         # ── 0.5. 从 context 读"你"指代谁 ──
         if context and not subject:
