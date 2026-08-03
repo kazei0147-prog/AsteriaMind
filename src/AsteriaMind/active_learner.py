@@ -47,6 +47,17 @@ class ActiveLearner:
         word = clean_word or word
         result = {"word": word, "lang": lang, "known": False}
 
+        # ★ v3.6: 实体门 — 虚词/歧义单字不触发搜索
+        #   "铁定" "因为" "一下" 不是实体 → 不搜
+        #   "铁"(单字无命名边) → 歧义 → 不搜, 请用户教
+        if self._is_queryable(word):
+            pass  # 可搜
+        else:
+            result["known"] = False
+            result["pending"] = True
+            result["note"] = f"「{word}」不是可查询的实体，请用 '教我 X 是 Y' 教学"
+            return result
+
         # 0. 查 StarMap (v3 认知空间 — 优先!)
         if self.star_map and hasattr(self.star_map, 'conn'):
             try:
@@ -349,6 +360,36 @@ class ActiveLearner:
                     pass
         if stored:
             self.star_map.conn.commit()
+
+    # 虚词组合: 不是实体, 不该触发搜索
+    _NON_ENTITY = frozenset(
+        '铁定 因为 所以 如果 而且 然后 一下 如何 怎么 为什么 什么 哪里 '
+        '多少 一些 很多 一个 这个 那个 这些 那些 就是 还是 可是 但是 '
+        '真的 其实 当然 可能 也许 大概 几乎 到底 究竟 到底 反正 或许 '
+        '应该 必须 一定 肯定 可能 大概 差不多 之类 一样 似的'.split()
+    )
+
+    def _is_queryable(self, word: str) -> bool:
+        """实体门: 这个词值得搜索吗?"""
+        if not word or len(word) > 12:
+            return False
+        if word in self._NON_ENTITY:
+            return False
+        # 单字词: 必须有命名边或符号词条, 否则歧义不搜
+        if len(word) == 1:
+            if self.star_map:
+                has_edge = self.star_map.conn.execute(
+                    "SELECT 1 FROM directed_edges WHERE source=? LIMIT 1",
+                    (word,)).fetchone()
+                if has_edge:
+                    return True
+                has_symbol = self.star_map.conn.execute(
+                    "SELECT 1 FROM symbol_star WHERE symbol=? LIMIT 1",
+                    (word,)).fetchone()
+                if has_symbol:
+                    return True
+                return False  # 单字且无记录 → 歧义
+        return True
 
     def _extract_facts(self, subj: str, pred: str, obj: str,
                        snippet: str) -> list[dict]:
