@@ -628,6 +628,10 @@ class CognitiveInterface:
         from AsteriaMind.intent_learner import IntentLearner
         self.intent_learner = IntentLearner(self.cognitive_star_map)
 
+        # ActionPrimitives: 动作原语 — 动词→动作绑定, 反馈学习
+        from AsteriaMind.action_primitives import ActionPrimitives
+        self.actions = ActionPrimitives(self.cognitive_star_map)
+
         # ActiveLearner: 在线学习 — 知识空白时对外查询
         from AsteriaMind.active_learner import ActiveLearner
         self.active_learner = ActiveLearner(

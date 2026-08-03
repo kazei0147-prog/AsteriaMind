@@ -77,6 +77,8 @@ _last_text = ""
 _last_intent = ""
 _last_subj = ""
 _last_rel = ""
+_last_verb = ""
+_last_action = ""
 
 # 从 DB 恢复已有知识
 for r in db.query():
@@ -405,6 +407,43 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         if text.startswith(('learnw ', 'readcn ', 'answer ', '以后我')):
             return self._process_legacy(text)
 
+        # ── ★ v3.6: 动作原语 — 动词理解 (查/算/教/讲) ★ ──
+        global _last_verb, _last_action
+        if hasattr(ci, 'actions'):
+            verb, target = ci.actions.extract(text)
+            if verb:
+                action = ci.actions.predict(verb)
+                _last_verb, _last_action = verb, action
+                if action == "search" and target:
+                    if ci.active_learner and ci.active_learner.web_search:
+                        try:
+                            result = ci.active_learner.learn_word(target)
+                            if result.get("known") and result.get("definition"):
+                                return (f"🔍 查「{target}」：{result['definition'][:200]}",
+                                        "search_learn", result)
+                        except Exception:
+                            pass
+                    return (f"🤔 查「{target}」没找到可靠信息，你能教我吗？",
+                            "search_gap", {})
+                if action == "math" and re.search(r'\d', target):
+                    from AsteriaMind.skill_library import SkillLibrary
+                    skill_lib = SkillLibrary()
+                    m = skill_lib.best_match(target)
+                    if m:
+                        return (f"🧮 {m['result']}", "math", {})
+                    return (f"🧮 我算不了「{target}」", "math_fail", {})
+                if action == "teach" and target:
+                    # 教我 X 是 Y → 存星图
+                    tm = re.match(r'(.+?)\s*(?:是|属于)\s*(.+)', target)
+                    if tm:
+                        ci.mother.star_map.store(tm.group(1).strip(), "IS_A",
+                                                 tm.group(2).strip(), "confirmed",
+                                                 f"teach: {text[:40]}")
+                        return (f"📖 学会了：{tm.group(1).strip()} 是 {tm.group(2).strip()}",
+                                "teach", {})
+                    return (f"🤔 想学「{target}」，但我不确定怎么记。"
+                            f"试试 '教我 企鹅 是 鸟类' 这种格式？", "teach_unknown", {})
+
         # ── v3.5: 联网搜索 — 桥接到 ActiveLearner 学习管道 ──
         search_query = None
         for pat in (r'^搜索[：:\s]*(.+)', r'^帮我搜[：:\s]*(.+)', r'^查一下[：:\s]*(.+)',
@@ -451,14 +490,16 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                         if c and c[0] > 1:
                             last_subj = kw; break
                     if last_subj: break
-        # 元认知: 检测用户反馈 → 策略评分 + 意图学习
-        global _last_strategy, _last_text, _last_intent
+        # 元认知: 检测用户反馈 → 策略评分 + 意图学习 + 动作学习
+        global _last_strategy, _last_text, _last_intent, _last_verb, _last_action
         if re.search(r'(不对|错了|不是|不是这样|不对哦|错啦)', text):
             if ci.mother and hasattr(ci.mother, 'meta_cognition'):
                 ci.mother.meta_cognition.learn_from_reflection(
                     _last_strategy, False)
             if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
                 ci.intent_learner.learn(_last_text, _last_intent, False)
+            if hasattr(ci, 'actions') and _last_verb and _last_action:
+                ci.actions.learn(_last_verb, _last_action, False)
             return ("🙏 明白了，我记下了，下次注意。", "feedback_negative", {})
         elif re.search(r'(说的对|正确|没错|是的|对呀|对的|说得对|没错没错|是的是的)', text):
             if ci.mother and hasattr(ci.mother, 'meta_cognition'):
@@ -466,6 +507,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     _last_strategy, True)
             if hasattr(ci, 'intent_learner') and _last_text and _last_intent:
                 ci.intent_learner.learn(_last_text, _last_intent, True)
+            if hasattr(ci, 'actions') and _last_verb and _last_action:
+                ci.actions.learn(_last_verb, _last_action, True)
             return ("😊 收到，我会记住的。", "feedback_positive", {})
 
         # 代词解析: 你/它/这/那 → 解析为主语
