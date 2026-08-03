@@ -624,6 +624,10 @@ class CognitiveInterface:
         from AsteriaMind.critic_module import CriticModule
         self.critic = CriticModule(self.cognitive_star_map)
 
+        # IntentLearner: 意图统计学习 — 从反馈替代正则
+        from AsteriaMind.intent_learner import IntentLearner
+        self.intent_learner = IntentLearner(self.cognitive_star_map)
+
         # ActiveLearner: 在线学习 — 知识空白时对外查询
         from AsteriaMind.active_learner import ActiveLearner
         self.active_learner = ActiveLearner(

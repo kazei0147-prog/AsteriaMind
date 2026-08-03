@@ -379,8 +379,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             text = re.sub(r'^你', '我', text)
             if ci.mother and ci.mother.star_map:
                 from AsteriaMind.language_generator import LanguageGenerator
-                from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
-                intent = infer_intent(text)
+                from AsteriaMind.intent_layer import apply_intent_weight
+                intent = ci.intent_learner.predict(text) if hasattr(ci, 'intent_learner') else "ASK"
                 lg = LanguageGenerator(ci.mother.star_map)
                 edges = ci.mother.star_map.query_edges("我", text, space="belief")
                 if edges:
@@ -441,15 +441,19 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                         if c and c[0] > 1:
                             last_subj = kw; break
                     if last_subj: break
-            # 元认知: 检测用户反馈 → 策略评分
+            # 元认知: 检测用户反馈 → 策略评分 + 意图学习
             if re.search(r'(说的对|正确|没错|是的|对呀)', text):
                 if ci.mother and hasattr(ci.mother, 'meta_cognition'):
                     ci.mother.meta_cognition.learn_from_reflection(
                         self._last_strategy, True)
+                if hasattr(ci, 'intent_learner') and self._last_text and self._last_intent:
+                    ci.intent_learner.learn(self._last_text, self._last_intent, True)
             elif re.search(r'(不对|错了|不是|不是���样|不对哦)', text):
                 if ci.mother and hasattr(ci.mother, 'meta_cognition'):
                     ci.mother.meta_cognition.learn_from_reflection(
                         self._last_strategy, False)
+                if hasattr(ci, 'intent_learner') and self._last_text and self._last_intent:
+                    ci.intent_learner.learn(self._last_text, self._last_intent, False)
 
         # 代词解析: 你/它/这/那 → 解析为主语
         if text.strip() in ('它','她','他','这','那','它们','她们','他们'):
@@ -517,9 +521,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
             # DIRECT / REVERSE: 走叙事管线
             from AsteriaMind.language_generator import LanguageGenerator
-            from AsteriaMind.intent_layer import infer_intent, apply_intent_weight
+            from AsteriaMind.intent_layer import apply_intent_weight
             subj = plan.subject
-            intent = infer_intent(text)
+            intent = ci.intent_learner.predict(text) if hasattr(ci, 'intent_learner') else "ASK"
             lg = LanguageGenerator(ci.mother.star_map)
 
             if plan.strategy == "REVERSE":
@@ -547,6 +551,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     narrative = crit["preface"] + narrative
             if narrative:
                 self._last_strategy = plan.strategy
+                self._last_text = text
+                self._last_intent = intent
                 for e in edges[:3]:
                     ci.mother.star_map.restore_energy(subj, e["target"], 0.03)
                 # ★ v3.6: 自学习 — 每个成功回答更新自我认知 ★
