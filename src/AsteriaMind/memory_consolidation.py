@@ -56,8 +56,39 @@ class MemoryConsolidation:
         decayed = self._decay_cold_edges()
         result["edges_decayed"] = decayed
 
+        # 4. ★ 调和矛盾 — 高能者留, 低能者降 ★
+        resolved = self._resolve_contradictions()
+        result["contradictions_resolved"] = resolved
+
         self.last_run = time.time()
         return result
+
+    def _resolve_contradictions(self) -> int:
+        """每个矛盾: 保留能量最高的边, 其余砍半"""
+        resolved = 0
+        for c in self.contradictions:
+            subj, pred, objs = c["subject"], c["predicate"], list(c["objects"])
+            if len(objs) < 2: continue
+            # 查每条边的能量
+            best = None
+            best_energy = 0
+            for obj in objs:
+                e = self.star_map.conn.execute(
+                    "SELECT energy FROM directed_edges WHERE source=? AND relation=? AND target=?",
+                    (subj, pred, obj)).fetchone()
+                energy = e[0] if e else 0
+                if energy > best_energy:
+                    best_energy = energy; best = obj
+            # 胜者保留, 败者砍半
+            for obj in objs:
+                if obj != best:
+                    self.star_map.conn.execute(
+                        "UPDATE directed_edges SET energy=energy*0.5 WHERE source=? AND relation=? AND target=?",
+                        (subj, pred, obj))
+                    resolved += 1
+        if resolved:
+            self.star_map.conn.commit()
+        return resolved
 
     def _discover_clusters(self) -> dict[str, set]:
         """
