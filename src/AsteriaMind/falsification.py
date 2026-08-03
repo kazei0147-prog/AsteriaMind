@@ -349,7 +349,10 @@ def _default_web_search(query: str, max_results: int = 5) -> list[WebResult]:
 
         raw = []
         for attempt in range(3):
-            raw = list(_DDGS_INSTANCE.text(query, max_results=max_results))
+            # ★ v3.6: region='cn-zh' — 中文搜索质量天差地别!
+            #   (默认 region 对中文支持极差: '星体' 会搜出电视剧/IDE)
+            raw = list(_DDGS_INSTANCE.text(query, max_results=max_results,
+                                           region='cn-zh'))
             if raw:
                 break
             import time

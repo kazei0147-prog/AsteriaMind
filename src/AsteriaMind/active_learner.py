@@ -33,6 +33,18 @@ class ActiveLearner:
 
         返回 {word, known, definition, source, confidence}
         """
+        # ★ v3.6: 查询词提纯 — 剥疑问词/泛词, 只留核心实体
+        clean_word = word.strip()
+        for prefix in ('如何', '怎么', '怎样', '为什么', '何为', '啥是', '什么是'):
+            if clean_word.startswith(prefix):
+                clean_word = clean_word[len(prefix):]
+                break
+        for suffix in ('是什么', '是啥', '怎么学', '如何学', '怎么做', '如何做'):
+            if clean_word.endswith(suffix):
+                clean_word = clean_word[:-len(suffix)]
+                break
+        clean_word = clean_word.strip('的了吗呢吧 ')
+        word = clean_word or word
         result = {"word": word, "lang": lang, "known": False}
 
         # 0. 查 StarMap (v3 认知空间 — 优先!)
@@ -72,15 +84,23 @@ class ActiveLearner:
             try:
                 search_result = self.web_search.search(f"{word} 定义", max_results=4)
                 # ★ v3.6: 相关性校验 — snippet/title 必须包含查询词, 否则是垃圾结果
+                _generic = ('如何', '怎么', '怎样', '为什么', '什么', '哪些',
+                            '一个', '这个', '那个', '一种', '学习', '使用',
+                            '可以', '能够', '关于', '以及', '就是')
                 for r in search_result:
                     if not r.snippet or "未连接" in r.snippet:
                         continue
                     # 查询词相关性: title 或 snippet 含 word 或其 2 字片段
                     hit = word in (r.title + r.snippet)
                     if not hit and len(word) >= 2:
-                        hit = word[:2] in (r.title + r.snippet)
+                        frag = word[:2]
+                        # 兜底片段不能是泛词 (如何/什么/学习/使用...)
+                        if frag not in _generic and len(word) >= 3:
+                            frag = word[-2:] if word[-2:] not in _generic else word[:2]
+                        if frag not in _generic:
+                            hit = frag in (r.title + r.snippet)
                     if not hit:
-                        continue  # 电视剧/广告 → 拒绝
+                        continue  # 电视剧/广告/无关 → 拒绝
                     result["known"] = True
                     result["definition"] = r.snippet[:200]
                     result["confidence"] = 0.5
