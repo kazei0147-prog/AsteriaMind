@@ -295,7 +295,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             resp_data = {
                 "reply": reply, "action": action,
                 "cognitive": cognitive,
-                "stats": f"数据库: {db.count()} 条关系 | 模板: {len(reg.templates)} 个",
+                "stats": f"星图: {ci.mother.star_map.conn.execute('SELECT COUNT(*) FROM directed_edges').fetchone()[0]} 边",
             }
 
             # 如果刚结束了旧会话, 附带评估摘要
@@ -374,8 +374,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         v3.3: 传入 reflection_ctx 支持反馈闭环
         """
-        # ★ v3.6: 自指拦截 — 必须在所有逻辑之前 ★
-        if re.match(r'^(你会|你能|你有什么|你是什么|你是谁|你不会|你能不能)', text):
+        # ★ v3.6: 自指拦截 — 所有"你"开头都转"我" ★
+        if text.startswith('你') and len(text) >= 3:
             text = re.sub(r'^你', '我', text)
             if ci.mother and ci.mother.star_map:
                 from AsteriaMind.language_generator import LanguageGenerator
