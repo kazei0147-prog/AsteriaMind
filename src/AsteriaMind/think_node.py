@@ -119,6 +119,24 @@ class ThinkNode:
                               relation_hints=[rel_hint],
                               search_query=f"{subject}(来自{best_source})")
 
+        # ── 4.5. co_text 联想 — 谁跟 subject 经常共现? ──
+        if self.star_map.co_conn:
+            for row in self.star_map.co_conn.execute(
+                "SELECT target, energy FROM directed_edges "
+                "WHERE source=? AND relation='co_text' "
+                "ORDER BY energy DESC LIMIT 10",
+                (subject,)).fetchall():
+                neighbor, energy = row
+                # 邻居在命名DB有边 → 借用它的知识
+                named = self.star_map.conn.execute(
+                    "SELECT 1 FROM directed_edges WHERE source=? "
+                    "AND relation IN ('IS_A','CAN','HAS','NOT_CAN') LIMIT 1",
+                    (neighbor,)).fetchone()
+                if named:
+                    return ActionPlan("DIRECT", neighbor,
+                                      relation_hints=[rel_hint],
+                                      search_query=f"{subject}(共现→{neighbor})")
+
         # ── 5. 完全陌生 — 上网查 ──
         return ActionPlan("SEARCH", "", search_query=clean)
 
