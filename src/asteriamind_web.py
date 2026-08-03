@@ -487,7 +487,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             plan = tn.plan(text, context or "")
 
             if plan.strategy == "CLARIFY":
-                return (f"🤔 「{text[:10]}」——我不太确定你指的是什么，能说具体一点吗？",
+                q = plan.search_query or text
+                if len(q) <= 2:
+                    return (f"嗯？你说了「{q}」——我没太明白，多说一点？",
+                            "clarify", {})
+                return (f"🤔 「{q[:10]}」——我没太理解，能换个方式说说吗？",
                         "clarify", {})
 
             if plan.strategy == "SEARCH":

@@ -98,6 +98,13 @@ class ThinkNode:
         self.last_subject = subject
         self.last_relation = rel_hint
 
+        # ── 2.5 该不该搜? 对话性短句 → 不搜 ──
+        if len(clean) <= 3:
+            return ActionPlan("CLARIFY", subject or clean, search_query=clean)
+        # 纯追问/元对话
+        if re.match(r'^(什么|怎么|为啥|为什么|是吗|真的|好吧|行|嗯|额|啊|唉|这|那)$', clean):
+            return ActionPlan("CLARIFY", subject or clean, search_query=clean)
+
         # ── 3. 星图中查 — 有直接边吗? ──
         named_count = self._count_named_edges(subject)
         if named_count >= 2:
