@@ -377,6 +377,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         return ""
 
     def _process(self, text: str, context: str = None) -> tuple[str, str, dict]:
+        # ★ 跨请求状态必须在函数顶部声明 global (先声明, 后任何赋值)
+        global _last_strategy, _last_text, _last_intent, _last_verb, _last_action
+        global _last_subj, _last_rel
         """
         ── Cognitive Interface Layer ──
         Semantic → Pragmatic → Action → Mother v3 → 回复
@@ -408,7 +411,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             return self._process_legacy(text)
 
         # ── ★ v3.6: 动作原语 — 动词理解 (查/算/教/讲) ★ ──
-        global _last_verb, _last_action
         if hasattr(ci, 'actions'):
             verb, target = ci.actions.extract(text)
             if verb:
@@ -491,7 +493,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                             last_subj = kw; break
                     if last_subj: break
         # 元认知: 检测用户反馈 → 策略评分 + 意图学习 + 动作学习
-        global _last_strategy, _last_text, _last_intent, _last_verb, _last_action
         if re.search(r'(不对|错了|不是|不是这样|不对哦|错啦)', text):
             if ci.mother and hasattr(ci.mother, 'meta_cognition'):
                 ci.mother.meta_cognition.learn_from_reflection(
@@ -545,7 +546,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             from AsteriaMind.think_node import ThinkNode
             tn = ThinkNode(ci.mother.star_map)
             # 注入持久化的短期记忆 (跨请求存活 — 模块级全局)
-            global _last_subj, _last_rel
             tn.last_subject = _last_subj
             tn.last_relation = _last_rel
             plan = tn.plan(text, context or "")
