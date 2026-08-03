@@ -471,6 +471,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             from AsteriaMind.think_node import ThinkNode
             tn = ThinkNode(ci.mother.star_map)
             plan = tn.plan(text, context or "")
+            with open("D:/AM/tn_trace.log", "a") as f:
+                f.write(f"TN: text={text[:30]!r} → {plan}\n")
 
             if plan.strategy == "CLARIFY":
                 return (f"🤔 「{text[:10]}」——我不太确定你指的是什么，能说具体一点吗？",
