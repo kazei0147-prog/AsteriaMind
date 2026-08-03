@@ -428,11 +428,11 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
                     return (f"🤔 查「{target}」没找到可靠信息，你能教我吗？",
                             "search_gap", {})
                 if action == "math" and re.search(r'\d', target):
-                    from AsteriaMind.skill_library import SkillLibrary
-                    skill_lib = SkillLibrary()
                     m = skill_lib.best_match(target)
                     if m:
-                        return (f"🧮 {m['result']}", "math", {})
+                        r = m.execute(target, kg)
+                        if r.get("success"):
+                            return (f"🧮 {r.get('result')}", "math", {})
                     return (f"🧮 我算不了「{target}」", "math_fail", {})
                 if action == "teach" and target:
                     # 教我 X 是 Y → 存星图
