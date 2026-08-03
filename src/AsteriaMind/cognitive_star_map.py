@@ -697,9 +697,11 @@ class CognitiveStarMap:
             (subj, pred, obj, pattern, feedback, time.time()))
         cog_id = cur.lastrowid
         if text:
-            lt = self._language_pattern(text)
-            stype = self._tag_sentence_type(text)
-            self.conn.execute(
+            # 不把内部追踪文本存入语言痕迹
+            if not text.startswith("online_learning:") and not (text.startswith("成功回答") and len(text) < 60):
+                lt = self._language_pattern(text)
+                stype = self._tag_sentence_type(text)
+                self.conn.execute(
                 "INSERT INTO language_traces"
                 "(sentence,subj,pred,obj,cognitive_id,pattern_type,sentence_type,timestamp) "
                 "VALUES(?,?,?,?,?,?,?,?)",
