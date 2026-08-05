@@ -193,6 +193,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._serve_dashboard()
         elif self.path == "/graph":
             self._serve_graph_page()
+        elif self.path == "/galaxy":
+            self._serve_galaxy_page()
         elif self.path == "/api/stats":
             ol_summary = ci.offline_learner.summary() if ci.offline_learner else {}
             self._json({
@@ -216,6 +218,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             import urllib.parse as _up
             entity = _up.unquote(self.path.split("/api/entity/")[1])
             self._handle_entity(entity)
+        elif self.path == "/api/galaxy":
+            self._handle_galaxy()
         else:
             self.send_error(404)
 
@@ -351,6 +355,156 @@ async function exploreEntity(){
   }catch(e){ document.getElementById('starMap').innerHTML='<span style="color:#f85149">展开失败: '+e+'</span>'; }
 }
 function exploreNode(el){ document.getElementById('entInput').value = el.getAttribute('data-ent'); exploreEntity(); }
+</script></body></html>"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
+
+    def _serve_galaxy_page(self):
+        """★ v3.6: 银河星系视图 — Canvas 星空 + 可缩放 + 点击光点动画"""
+        html = """<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>AM 知识星系</title>
+<style>
+body{margin:0;background:#05070f;color:#e6edf3;font-family:system-ui,sans-serif;overflow:hidden}
+#galaxy{position:fixed;inset:0;cursor:grab}
+#info{position:fixed;top:16px;left:16px;z-index:10;font-size:13px;color:#8b949e}
+#info b{color:#58a6ff}
+#tip{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;font-size:12px;color:#484f58;background:rgba(5,7,15,0.7);padding:6px 14px;border-radius:20px}
+#card{position:fixed;right:16px;top:16px;z-index:10;background:rgba(22,27,34,0.92);border:1px solid #30363d;border-radius:10px;padding:14px 18px;min-width:220px;display:none;font-size:13px}
+#card h3{margin:0 0 8px;color:#58a6ff;font-size:15px}
+#card .rel{margin:4px 0;color:#e6edf3}
+#card .rel span{color:#d29922}
+#card .rel .low{color:#f85149}
+#card .e{color:#8b949e;font-size:11px;margin-left:6px}
+#card .entropy{color:#f0883e;font-size:12px;margin-bottom:8px}
+</style></head><body>
+<div id="info">🌌 <b>AM 知识星系</b> — 滚轮缩放 · 拖拽平移 · 点击恒星看连接</div>
+<div id="tip">共 <b id="count">0</b> 颗恒星 — 大=知识多, 亮=确定, 点击展开关系</div>
+<div id="card"></div>
+<canvas id="galaxy"></canvas>
+<script>
+const cv = document.getElementById('galaxy'), ctx = cv.getContext('2d');
+let W, H, stars = [], entities = [], links = [], zoom = 1, panX = 0, panY = 0;
+let animT = 0, hover = null, dragging = false, lastX = 0, lastY = 0;
+function resize(){ W = cv.width = innerWidth; H = cv.height = innerHeight; }
+addEventListener('resize', resize); resize();
+function rnd(a,b){ return a + Math.random()*(b-a); }
+function initStars(){
+  stars = [];
+  for(let i=0;i<260;i++){ stars.push({x:rnd(0,W), y:rnd(0,H), r:rnd(0.3,1.4), tw:rnd(0.5,2), ph:rnd(0,6.28)}); }
+}
+async function loadGalaxy(){
+  try{
+    const r = await fetch('/api/galaxy');
+    entities = await r.json();
+    document.getElementById('count').textContent = entities.length;
+    const maxE = Math.max(...entities.map(e=>e.energy));
+    entities.forEach((e,i)=>{
+      const ang = i * 2.39996;  // 黄金角螺旋
+      const rad = Math.sqrt(i) * 90;
+      e.x = W/2 + Math.cos(ang)*rad;
+      e.y = H/2 + Math.sin(ang)*rad;
+      e.r = 5 + 10 * (e.energy/maxE);
+      e.bright = 0.5 + 0.5 * (e.energy/maxE);  // 亮度=能量
+    });
+  }catch(e){ console.error(e); }
+}
+async function openEntity(name){
+  try{
+    const r = await fetch('/api/entity/'+encodeURIComponent(name));
+    const d = await r.json();
+    const card = document.getElementById('card');
+    let html = '<h3>'+d.entity+'</h3>';
+    if(d.entropy > 0) html += '<div class="entropy">熵 H'+d.entropy+' — 知识模糊</div>';
+    (d.out_edges||[]).slice(0,8).forEach(e=>{
+      const cls = e.energy < 0.5 ? 'low' : '';
+      html += '<div class="rel"><span class="'+cls+'">['+e.relation+']</span> '+e.target+'<span class="e">E'+e.energy+'</span></div>';
+    });
+    if(!(d.out_edges||[]).length) html += '<div style="color:#8b949e">还没有命名知识边</div>';
+    card.innerHTML = html;
+    card.style.display = 'block';
+    // 画关系光点动画
+    links = (d.out_edges||[]).slice(0,8).map(e=>({
+      from: entities.find(x=>x.entity===name),
+      to:   entities.find(x=>x.entity===e.target),
+      rel: e.relation, energy: e.energy
+    })).filter(l=>l.from && l.to);
+    if(!links.length){ // 目标不在星系 → 画到鼠标方向
+      links = (d.out_edges||[]).slice(0,8).map(e=>({
+        from: entities.find(x=>x.entity===name), to:null, rel:e.relation, energy:e.energy
+      })).filter(l=>l.from);
+    }
+  }catch(e){ console.error(e); }
+}
+function draw(){
+  ctx.fillStyle = '#05070f'; ctx.fillRect(0,0,W,H);
+  // 星空
+  stars.forEach(s=>{
+    const a = 0.4 + 0.6*Math.sin(animT*s.tw + s.ph);
+    ctx.fillStyle = 'rgba(200,210,255,'+(a*0.5)+')';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.28); ctx.fill();
+  });
+  ctx.save();
+  ctx.translate(W/2 + panX, H/2 + panY);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-W/2, -H/2);
+  // 关系线 + 光点动画
+  links.forEach((l,i)=>{
+    if(!l.from) return;
+    const sx = l.from.x, sy = l.from.y;
+    const ex = l.to ? l.to.x : l.from.x + Math.cos(animT*1.5)*160, ey = l.to ? l.to.y : l.from.y + Math.sin(animT*1.5)*160;
+    ctx.strokeStyle = l.energy < 0.5 ? 'rgba(248,81,73,0.35)' : 'rgba(88,166,255,0.35)';
+    ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    // 流动光点
+    const t = (animT*0.8 + i*0.13) % 1;
+    const px = sx + (ex-sx)*t, py = sy + (ey-sy)*t;
+    ctx.fillStyle = l.energy < 0.5 ? '#f85149' : '#58a6ff';
+    ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 6.28); ctx.fill();
+    // 关系标签
+    ctx.fillStyle = '#d29922'; ctx.font = '11px sans-serif';
+    ctx.fillText('['+l.rel+']', (sx+ex)/2, (sy+ey)/2 - 6);
+  });
+  // 实体节点
+  entities.forEach(e=>{
+    const hov = hover === e.entity;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r*(hov?1.3:1), 0, 6.28);
+    ctx.fillStyle = 'rgba(88,166,255,'+(0.25*e.bright)+')';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(88,166,255,'+(0.9*e.bright)+')';
+    ctx.lineWidth = hov?2:1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(230,237,243,'+(0.55+0.45*e.bright)+')';
+    ctx.font = (hov?'13px':'11px')+' sans-serif';
+    ctx.fillText(e.entity, e.x - ctx.measureText(e.entity).width/2, e.y - e.r - 6);
+  });
+  ctx.restore();
+  animT += 0.016;
+  requestAnimationFrame(draw);
+}
+cv.addEventListener('wheel', e=>{ e.preventDefault(); zoom = Math.min(4, Math.max(0.4, zoom * (e.deltaY<0?1.15:0.87))); }, {passive:false});
+cv.addEventListener('mousedown', e=>{ dragging = true; lastX = e.clientX; lastY = e.clientY; cv.style.cursor='grabbing'; });
+addEventListener('mouseup', ()=>{ dragging = false; cv.style.cursor='grab'; });
+cv.addEventListener('mousemove', e=>{
+  if(dragging){ panX += e.clientX-lastX; panY += e.clientY-lastY; lastX = e.clientX; lastY = e.clientY; return; }
+  // hover 检测 (考虑缩放/平移)
+  const mx = (e.clientX - W/2 - panX)/zoom + W/2, my = (e.clientY - H/2 - panY)/zoom + H/2;
+  hover = null;
+  for(const ent of entities){
+    if(Math.hypot(mx-ent.x, my-ent.y) < ent.r+6){ hover = ent.entity; break; }
+  }
+  cv.style.cursor = hover ? 'pointer' : 'grab';
+});
+cv.addEventListener('click', e=>{
+  const mx = (e.clientX - W/2 - panX)/zoom + W/2, my = (e.clientY - H/2 - panY)/zoom + H/2;
+  for(const ent of entities){
+    if(Math.hypot(mx-ent.x, my-ent.y) < ent.r+6){ openEntity(ent.entity); return; }
+  }
+  document.getElementById('card').style.display='none'; links=[];
+});
+initStars(); loadGalaxy(); draw();
 </script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -587,6 +741,22 @@ function exploreNode(el){ document.getElementById('entInput').value = el.getAttr
                 "cold_count": len(cold),
             },
         })
+
+    def _handle_galaxy(self):
+        """★ v3.6: 星系视图数据 — 全部命名实体 + 能量 (节点大小/亮度)
+
+        返回: [{entity, edges, energy}, ...] 按能量降序
+        """
+        import sqlite3 as sqlite3_mod
+        api_conn = sqlite3_mod.connect('D:/AM/HiveMind_repo/src/asteriamind.db')
+        api_conn.execute('PRAGMA busy_timeout = 5000')
+        rows = api_conn.execute(
+            "SELECT source, COUNT(*) as n, ROUND(SUM(COALESCE(energy,1.0)),1) as e "
+            "FROM directed_edges "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "GROUP BY source ORDER BY n DESC LIMIT 120").fetchall()
+        api_conn.close()
+        self._json([{"entity": s, "edges": n, "energy": e} for s, n, e in rows])
 
     def _handle_entity(self, entity: str):
         """★ v3.6: 实体详情 — 单个实体的关系网络 + 熵 + 能量
