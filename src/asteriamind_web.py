@@ -341,7 +341,7 @@ async function exploreEntity(){
         +'<line x1="'+cx+'" y1="'+cy+'" x2="'+x+'" y2="'+y+'" stroke="'+color+'" stroke-width="1.5" stroke-dasharray="'+(e.energy<0.5?'4 3':'none')+'"/>'
         +'<text x="'+(cx+x)/2+'" y="'+(cy+y)/2-4+'" fill="#d29922" font-size="11" text-anchor="middle">['+e.relation+']</text>'
         +'<circle cx="'+cx+'" cy="'+cy+'" r="18" fill="#1f6feb" stroke="#58a6ff" stroke-width="1"/>'
-        +'<circle cx="'+x+'" cy="'+y+'" r="12" fill="#21262d" stroke="'+color+'" stroke-width="1" cursor="pointer" onclick="document.getElementById(\'entInput\').value=\''+e.target+'\';exploreEntity()"/>'
+        +'<circle cx="'+x+'" cy="'+y+'" r="12" fill="#21262d" stroke="'+color+'" stroke-width="1" cursor="pointer" data-ent="'+e.target+'" onclick="exploreNode(this)"/>'
         +'<text x="'+x+'" y="'+y+'" fill="#e6edf3" font-size="10" text-anchor="middle" dominant-baseline="central">'+e.target+'</text>'
         +'</svg>';
     });
@@ -350,6 +350,7 @@ async function exploreEntity(){
     box.innerHTML = html;
   }catch(e){ document.getElementById('starMap').innerHTML='<span style="color:#f85149">展开失败: '+e+'</span>'; }
 }
+function exploreNode(el){ document.getElementById('entInput').value = el.getAttribute('data-ent'); exploreEntity(); }
 </script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
