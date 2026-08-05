@@ -362,149 +362,131 @@ function exploreNode(el){ document.getElementById('entInput').value = el.getAttr
         self.wfile.write(html.encode('utf-8'))
 
     def _serve_galaxy_page(self):
-        """★ v3.6: 银河星系视图 — Canvas 星空 + 可缩放 + 点击光点动画"""
+        """★ v3.6: 知识星系 (Cytoscape.js 力导向版)
+
+        现成图库 + 你的数据 + 颜色语义:
+          节点: 大小=能量, 颜色=熵(高熵红/正常蓝)
+          边:   NOT_CAN=红 / IS_A=绿 / CAN=青 / HAS=黄 / EATS=橙
+          虚线 = 低能量(冷边)  点击节点 → 数据卡
+        """
         html = """<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8">
 <title>AM 知识星系</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 <style>
-body{margin:0;background:#05070f;color:#e6edf3;font-family:system-ui,sans-serif;overflow:hidden}
-#galaxy{position:fixed;inset:0;cursor:grab}
-#info{position:fixed;top:16px;left:16px;z-index:10;font-size:13px;color:#8b949e}
+body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;overflow:hidden}
+#cy{position:fixed;inset:0}
+#info{position:fixed;top:14px;left:16px;z-index:10;font-size:13px;color:#8b949e}
 #info b{color:#58a6ff}
-#tip{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;font-size:12px;color:#484f58;background:rgba(5,7,15,0.7);padding:6px 14px;border-radius:20px}
-#card{position:fixed;right:16px;top:16px;z-index:10;background:rgba(22,27,34,0.92);border:1px solid #30363d;border-radius:10px;padding:14px 18px;min-width:220px;display:none;font-size:13px}
-#card h3{margin:0 0 8px;color:#58a6ff;font-size:15px}
-#card .rel{margin:4px 0;color:#e6edf3}
-#card .rel span{color:#d29922}
-#card .rel .low{color:#f85149}
-#card .e{color:#8b949e;font-size:11px;margin-left:6px}
+#tip{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;font-size:12px;color:#484f58;background:rgba(13,17,23,0.8);padding:6px 14px;border-radius:20px;white-space:nowrap}
+#card{position:fixed;right:16px;top:16px;z-index:10;background:rgba(22,27,34,0.94);border:1px solid #30363d;border-radius:10px;padding:14px 18px;min-width:230px;max-width:300px;display:none;font-size:13px;max-height:70vh;overflow-y:auto}
+#card h3{margin:0 0 4px;color:#58a6ff;font-size:15px}
+#card .meta{color:#8b949e;font-size:11px;margin-bottom:8px}
 #card .entropy{color:#f0883e;font-size:12px;margin-bottom:8px}
+#card .rel{margin:3px 0;color:#e6edf3;font-size:12px}
+#card .rel .r{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:6px;vertical-align:-2px}
+#card .rel .e{color:#8b949e;font-size:10px;margin-left:4px}
+#legend{position:fixed;left:16px;bottom:16px;z-index:10;font-size:11px;color:#8b949e;background:rgba(13,17,23,0.8);padding:8px 12px;border-radius:8px}
+#legend div{margin:2px 0;display:flex;align-items:center;gap:6px}
+#legend .sw{display:inline-block;width:18px;height:3px;border-radius:2px}
 </style></head><body>
-<div id="info">🌌 <b>AM 知识星系</b> — 滚轮缩放 · 拖拽平移 · 点击恒星看连接</div>
-<div id="tip">共 <b id="count">0</b> 颗恒星 — 大=知识多, 亮=确定, 点击展开关系</div>
+<div id="info">🌌 <b>AM 知识星系</b> (Cytoscape) — 拖动平移 · 滚轮缩放 · 点击恒星看关系</div>
+<div id="tip">大=知识多 · 亮=确定 · 高熵红边 · 虚线=冷边</div>
+<div id="legend">
+  <div><span class="sw" style="background:#3fb950"></span>IS_A 分类</div>
+  <div><span class="sw" style="background:#58a6ff"></span>CAN 能力</div>
+  <div><span class="sw" style="background:#f85149"></span>NOT_CAN 否定</div>
+  <div><span class="sw" style="background:#d29922"></span>HAS 属性</div>
+  <div><span class="sw" style="background:#a371f7"></span>EATS 捕食</div>
+  <div><span class="sw" style="background:#f0883e"></span>LIVES_IN 栖息</div>
+  <div><span class="sw" style="background:#39c5cf"></span>ORBITS 环绕</div>
+  <div><span class="sw" style="border-top:2px dashed #484f58"></span>虚线 = 低能量(冷边)</div>
+</div>
 <div id="card"></div>
-<canvas id="galaxy"></canvas>
+<div id="cy"></div>
 <script>
-const cv = document.getElementById('galaxy'), ctx = cv.getContext('2d');
-let W, H, stars = [], entities = [], links = [], zoom = 1, panX = 0, panY = 0;
-let animT = 0, hover = null, dragging = false, lastX = 0, lastY = 0;
-function resize(){ W = cv.width = innerWidth; H = cv.height = innerHeight; }
-addEventListener('resize', resize); resize();
-function rnd(a,b){ return a + Math.random()*(b-a); }
-function initStars(){
-  stars = [];
-  for(let i=0;i<260;i++){ stars.push({x:rnd(0,W), y:rnd(0,H), r:rnd(0.3,1.4), tw:rnd(0.5,2), ph:rnd(0,6.28)}); }
-}
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  style: [
+    {selector:'node', style:{
+      'background-color':'data(color)','width':'data(size)','height':'data(size)',
+      'label':'data(label)','font-size':11,'color':'#e6edf3','text-valign':'bottom',
+      'text-margin-y':6,'border-width':1,'border-color':'rgba(255,255,255,0.3)'
+    }},
+    {selector:'node.hot', style:{'border-width':3,'border-color':'#f0883e'}},
+    {selector:'edge', style:{
+      'width':1.5,'line-color':'data(color)','target-arrow-shape':'triangle',
+      'target-arrow-color':'data(color)','curve-style':'bezier',
+      'label':'data(label)','font-size':8,'color':'#8b949e','text-rotation':'autorotate'
+    }},
+    {selector:'edge.cold', style:{'line-style':'dashed','opacity':0.55}}
+  ],
+  layout:{name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}
+});
+const relColor = {
+  'IS_A':'#3fb950','CAN':'#58a6ff','NOT_CAN':'#f85149','HAS':'#d29922',
+  'EATS':'#a371f7','LIVES_IN':'#f0883e','ORBITS':'#39c5cf'
+};
 async function loadGalaxy(){
   try{
-    const r = await fetch('/api/galaxy');
-    entities = await r.json();
-    document.getElementById('count').textContent = entities.length;
-    const maxE = Math.max(...entities.map(e=>e.energy));
-    entities.forEach((e,i)=>{
-      const ang = i * 2.39996;  // 黄金角螺旋
-      const rad = Math.sqrt(i) * 90;
-      e.x = W/2 + Math.cos(ang)*rad;
-      e.y = H/2 + Math.sin(ang)*rad;
-      e.r = 5 + 10 * (e.energy/maxE);
-      e.bright = 0.5 + 0.5 * (e.energy/maxE);  // 亮度=能量
-    });
-  }catch(e){ console.error(e); }
+    const gal = await (await fetch('/api/galaxy')).json();
+    const maxE = Math.max(...gal.map(g=>g.energy));
+    const cloud = (await (await fetch('/api/graph')).json()).entropy_cloud || [];
+    const hotEnts = new Set(cloud.map(c=>c.entity));
+    const nodes = gal.map(g=>({
+      data:{id:g.entity, label:g.entity,
+            size:Math.max(20, Math.min(70, 18+26*g.energy/maxE)),
+            color: hotEnts.has(g.entity) ? '#f0883e' : '#58a6ff'},
+      classes: hotEnts.has(g.entity) ? 'hot' : ''
+    }));
+    cy.add(nodes);
+    cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}).run();
+    // 预加载 top 6 实体的关系 (让星系一开始就有边)
+    for(const g of gal.slice(0,6)){ await addEntityEdges(g.entity); }
+  }catch(e){ console.error('加载失败:', e); }
 }
-async function openEntity(name){
+async function addEntityEdges(name){
+  if(cy.getElementById(name).hasClass('expanded')) return;
   try{
-    const r = await fetch('/api/entity/'+encodeURIComponent(name));
-    const d = await r.json();
+    const d = await (await fetch('/api/entity/'+encodeURIComponent(name))).json();
+    const exists = n => cy.getElementById(n).length > 0;
+    // 先加邻居节点
+    (d.out_edges||[]).forEach(e=>{ if(!exists(e.target)) cy.add({data:{id:e.target,label:e.target,size:14,color:'#888'}}); });
+    // 加边
+    (d.out_edges||[]).forEach(e=>{
+      const eid = name+'__'+e.relation+'__'+e.target;
+      if(!cy.getElementById(eid).length){
+        cy.add({data:{id:eid, source:name, target:e.target, label:e.relation,
+                      color: relColor[e.relation]||'#888'},
+                classes: e.energy<0.5 ? 'cold' : ''});
+      }
+    });
+    cy.getElementById(name).addClass('expanded');
+    cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}).run();
+  }catch(e){ console.error('实体展开失败:', e); }
+}
+cy.on('tap','node', evt=>{
+  const n = evt.target;
+  showCard(n.id());
+  addEntityEdges(n.id());
+});
+cy.on('tap', evt=>{ if(evt.target === cy){ document.getElementById('card').style.display='none'; } });
+async function showCard(name){
+  try{
+    const d = await (await fetch('/api/entity/'+encodeURIComponent(name))).json();
     const card = document.getElementById('card');
     let html = '<h3>'+d.entity+'</h3>';
-    if(d.entropy > 0) html += '<div class="entropy">熵 H'+d.entropy+' — 知识模糊</div>';
-    (d.out_edges||[]).slice(0,8).forEach(e=>{
-      const cls = e.energy < 0.5 ? 'low' : '';
-      html += '<div class="rel"><span class="'+cls+'">['+e.relation+']</span> '+e.target+'<span class="e">E'+e.energy+'</span></div>';
+    html += '<div class="meta">出边 '+ (d.out_edges||[]).length +' · 入边 '+ (d.in_edges||[]).length +'</div>';
+    if(d.entropy > 0.5) html += '<div class="entropy">⚠ 熵 H'+d.entropy+' — 知识模糊</div>';
+    (d.out_edges||[]).slice(0,12).forEach(e=>{
+      html += '<div class="rel"><span class="r" style="background:'+(relColor[e.relation]||'#888')+'"></span>'
+        +'['+e.relation+'] '+e.target+'<span class="e">E'+e.energy+(e.energy<0.5?' ⚠':'')+'</span></div>';
     });
     if(!(d.out_edges||[]).length) html += '<div style="color:#8b949e">还没有命名知识边</div>';
-    card.innerHTML = html;
-    card.style.display = 'block';
-    // 画关系光点动画
-    links = (d.out_edges||[]).slice(0,8).map(e=>({
-      from: entities.find(x=>x.entity===name),
-      to:   entities.find(x=>x.entity===e.target),
-      rel: e.relation, energy: e.energy
-    })).filter(l=>l.from && l.to);
-    if(!links.length){ // 目标不在星系 → 画到鼠标方向
-      links = (d.out_edges||[]).slice(0,8).map(e=>({
-        from: entities.find(x=>x.entity===name), to:null, rel:e.relation, energy:e.energy
-      })).filter(l=>l.from);
-    }
+    card.innerHTML = html; card.style.display = 'block';
   }catch(e){ console.error(e); }
 }
-function draw(){
-  ctx.fillStyle = '#05070f'; ctx.fillRect(0,0,W,H);
-  // 星空
-  stars.forEach(s=>{
-    const a = 0.4 + 0.6*Math.sin(animT*s.tw + s.ph);
-    ctx.fillStyle = 'rgba(200,210,255,'+(a*0.5)+')';
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.28); ctx.fill();
-  });
-  ctx.save();
-  ctx.translate(W/2 + panX, H/2 + panY);
-  ctx.scale(zoom, zoom);
-  ctx.translate(-W/2, -H/2);
-  // 关系线 + 光点动画
-  links.forEach((l,i)=>{
-    if(!l.from) return;
-    const sx = l.from.x, sy = l.from.y;
-    const ex = l.to ? l.to.x : l.from.x + Math.cos(animT*1.5)*160, ey = l.to ? l.to.y : l.from.y + Math.sin(animT*1.5)*160;
-    ctx.strokeStyle = l.energy < 0.5 ? 'rgba(248,81,73,0.35)' : 'rgba(88,166,255,0.35)';
-    ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
-    // 流动光点
-    const t = (animT*0.8 + i*0.13) % 1;
-    const px = sx + (ex-sx)*t, py = sy + (ey-sy)*t;
-    ctx.fillStyle = l.energy < 0.5 ? '#f85149' : '#58a6ff';
-    ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 6.28); ctx.fill();
-    // 关系标签
-    ctx.fillStyle = '#d29922'; ctx.font = '11px sans-serif';
-    ctx.fillText('['+l.rel+']', (sx+ex)/2, (sy+ey)/2 - 6);
-  });
-  // 实体节点
-  entities.forEach(e=>{
-    const hov = hover === e.entity;
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, e.r*(hov?1.3:1), 0, 6.28);
-    ctx.fillStyle = 'rgba(88,166,255,'+(0.25*e.bright)+')';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(88,166,255,'+(0.9*e.bright)+')';
-    ctx.lineWidth = hov?2:1;
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(230,237,243,'+(0.55+0.45*e.bright)+')';
-    ctx.font = (hov?'13px':'11px')+' sans-serif';
-    ctx.fillText(e.entity, e.x - ctx.measureText(e.entity).width/2, e.y - e.r - 6);
-  });
-  ctx.restore();
-  animT += 0.016;
-  requestAnimationFrame(draw);
-}
-cv.addEventListener('wheel', e=>{ e.preventDefault(); zoom = Math.min(4, Math.max(0.4, zoom * (e.deltaY<0?1.15:0.87))); }, {passive:false});
-cv.addEventListener('mousedown', e=>{ dragging = true; lastX = e.clientX; lastY = e.clientY; cv.style.cursor='grabbing'; });
-addEventListener('mouseup', ()=>{ dragging = false; cv.style.cursor='grab'; });
-cv.addEventListener('mousemove', e=>{
-  if(dragging){ panX += e.clientX-lastX; panY += e.clientY-lastY; lastX = e.clientX; lastY = e.clientY; return; }
-  // hover 检测 (考虑缩放/平移)
-  const mx = (e.clientX - W/2 - panX)/zoom + W/2, my = (e.clientY - H/2 - panY)/zoom + H/2;
-  hover = null;
-  for(const ent of entities){
-    if(Math.hypot(mx-ent.x, my-ent.y) < ent.r+6){ hover = ent.entity; break; }
-  }
-  cv.style.cursor = hover ? 'pointer' : 'grab';
-});
-cv.addEventListener('click', e=>{
-  const mx = (e.clientX - W/2 - panX)/zoom + W/2, my = (e.clientY - H/2 - panY)/zoom + H/2;
-  for(const ent of entities){
-    if(Math.hypot(mx-ent.x, my-ent.y) < ent.r+6){ openEntity(ent.entity); return; }
-  }
-  document.getElementById('card').style.display='none'; links=[];
-});
-initStars(); loadGalaxy(); draw();
+loadGalaxy();
 </script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
