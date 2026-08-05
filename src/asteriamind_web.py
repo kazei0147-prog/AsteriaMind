@@ -88,18 +88,17 @@ def _speak_with_own_language(subj: str, edges: list) -> str:
     """★ v3.7: 统计语言生成 — 从她读过的句子采样句式, 不写模板
 
     edges: query_edges 返回的边 (含 relation/target/salience)
-    返回: 自然语言; 骨架池无匹配时返回 "" (由模板兜底)
+    返回: 自然语言; 骨架池无匹配/模块被卸载时返回 "" (模板兜底)
     """
-    global _LM_CACHE
     try:
-        if _LM_CACHE is None:
-            from AsteriaMind.language_model import LanguageModel
-            _LM_CACHE = LanguageModel()
-            _LM_CACHE.mine(min_count=1)
+        from AsteriaMind.module_registry import REGISTRY
+        lang = REGISTRY.get("language")
+        if lang is None:
+            return ""  # 语言模块被卸载 → 模板兜底
         edge_dicts = [{"source": subj, "relation": e["relation"],
                        "target": e["target"]}
                       for e in edges[:5]]
-        return _LM_CACHE.speak(edge_dicts, max_sent=4)
+        return lang.run(edge_dicts, max_sent=4)
     except Exception as e:
         print(f"统计语言生成失败: {e}")
         return ""
@@ -218,6 +217,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._serve_graph_page()
         elif self.path == "/galaxy":
             self._serve_galaxy_page()
+        elif self.path.startswith("/api/modules"):
+            self._handle_modules()
         elif self.path == "/api/stats":
             ol_summary = ci.offline_learner.summary() if ci.offline_learner else {}
             self._json({
@@ -775,6 +776,25 @@ loadGalaxy();
             },
         })
 
+    def _handle_modules(self):
+        """★ v3.7: 认知模块注册表 — 查看/开关 (门框, 人类现在就能操作)
+
+        GET /api/modules                    → 全部模块状态
+        GET /api/modules?toggle=critic&enabled=false → 卸载/禁用
+        """
+        from AsteriaMind.module_registry import REGISTRY
+        import urllib.parse as _upm
+        if "?" in self.path:
+            qs = _upm.parse_qs(self.path.split("?", 1)[1])
+            name = qs.get("toggle", [""])[0]
+            enabled = qs.get("enabled", ["true"])[0] == "true"
+            if name:
+                ok = REGISTRY.toggle(name, enabled)
+                self._json({"toggled": name, "enabled": enabled,
+                            "ok": ok, **REGISTRY.health_report()})
+                return
+        self._json(REGISTRY.health_report())
+
     def _handle_galaxy(self):
         """★ v3.6: 星系视图数据 — 实体 + 能量 + 分类中枢 (自动涌现)
 
@@ -1225,10 +1245,15 @@ loadGalaxy();
                         "triggers": [e["relation"]], "degree": 0}
                        for e in edges[:8]]
                 narrative = lg._compose_narrative(subj, act, [], intent=intent)
-            # ★ v3.6: 批判者 — 熵高时诚实标注不确定性 ★
+            # ★ v3.6: 批判者 — 熵高时诚实标注不确定性 (走注册表, 可卸载) ★
             critic_note = None
-            if narrative and hasattr(ci, 'critic'):
-                crit = ci.critic.check(subj)
+            if narrative:
+                try:
+                    from AsteriaMind.module_registry import REGISTRY
+                    critic_mod = REGISTRY.get("critic")
+                    crit = critic_mod.run(subj) if critic_mod else None
+                except Exception:
+                    crit = ci.critic.check(subj) if hasattr(ci, 'critic') else None
                 if crit:
                     critic_note = crit
                     narrative = crit["preface"] + narrative

@@ -624,6 +624,54 @@ class CognitiveInterface:
         from AsteriaMind.critic_module import CriticModule
         self.critic = CriticModule(self.cognitive_star_map)
 
+        # ★ v3.7: 认知模块收编 — 注册表 (可替换/可卸载的门框)
+        from AsteriaMind.module_registry import CognitiveModule, REGISTRY
+
+        class _CriticModule(CognitiveModule):
+            name = "critic"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, entity):
+                return self.inner.check(entity)
+            def health(self):
+                n = self.inner.scan_uncertain(top_k=20)
+                return 1.0 if len(n) > 0 else 0.5
+
+        class _IntakeModule(CognitiveModule):
+            name = "intake"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, word, title, snippet):
+                return self.inner.ingest_web(word, title, snippet)
+            def health(self):
+                return 1.0
+
+        class _LanguageModule(CognitiveModule):
+            name = "language"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, edges, max_sent=4):
+                if self.inner is None:
+                    from AsteriaMind.language_model import LanguageModel
+                    self.inner = LanguageModel()
+                    self.inner.mine(min_count=1)
+                return self.inner.speak(edges, max_sent=max_sent)
+            def health(self):
+                if self.inner is None:
+                    return 0.3
+                total = sum(len(v) for v in self.inner._pool.values()) \
+                    if self.inner._pool else 0
+                return min(1.0, 0.3 + total / 500)
+
+        REGISTRY.register(_CriticModule(self.critic))
+        from AsteriaMind.intake_purifier import IntakePurifier
+        self.intake = IntakePurifier(self.cognitive_star_map)
+        REGISTRY.register(_IntakeModule(self.intake))
+        REGISTRY.register(_LanguageModule(None))  # 语言模型延迟加载
+
         # IntentLearner: 意图统计学习 — 从反馈替代正则
         from AsteriaMind.intent_learner import IntentLearner
         self.intent_learner = IntentLearner(self.cognitive_star_map)
