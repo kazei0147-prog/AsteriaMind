@@ -386,9 +386,6 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
 
         v3.3: 传入 reflection_ctx 支持反馈闭环
         """
-        # DEBUG: 追踪入口
-        with open("D:/AM/_proc_debug.txt", "a") as _f:
-            _f.write(f"PROC: {text!r}\n")
         # ★ v3.6: 自指拦截 — 只对"你是谁/你会什么"这类自我认知问句 ★
         #   注意: "你知道铁是什么吗" 不是自指, 是问铁! 三种"你"要区分:
         #   ① 自我认知: 你是谁/你叫什么/你会什么/你能做什么 → self_ref
