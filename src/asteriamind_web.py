@@ -436,10 +436,12 @@ const relColor = {
 async function loadGalaxy(){
   try{
     const gal = await (await fetch('/api/galaxy')).json();
-    const maxE = Math.max(...gal.map(g=>g.energy));
+    const gl = gal.nodes || gal;   // 兼容 {nodes, edges} 新格式
+    const edges = gal.edges || [];
+    const maxE = Math.max(...gl.map(g=>g.energy));
     const cloud = (await (await fetch('/api/graph')).json()).entropy_cloud || [];
     const hotEnts = new Set(cloud.map(c=>c.entity));
-    const nodes = gal.map(g=>{
+    const nodes = gl.map(g=>{
       // 中枢节点 (分类词): 金色 + 按入度放大 (自动涌现的分类枢纽)
       const hub = g.is_hub;
       const weight = g.edges + (g.in_degree||0)*2;
@@ -451,9 +453,16 @@ async function loadGalaxy(){
       };
     });
     cy.add(nodes);
-    cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}).run();
-    // 预加载 top 6 实体的关系 (让星系一开始就有边)
-    for(const g of gal.slice(0,6)){ await addEntityEdges(g.entity); }
+    // ★ 全量连线: 节点间所有命名边一次性加入 → 群星漂浮 + 线连接
+    edges.forEach(e=>{
+      const eid = e.source+'__'+e.relation+'__'+e.target;
+      if(!cy.getElementById(eid).length){
+        cy.add({data:{id:eid, source:e.source, target:e.target, label:e.relation,
+                      color: relColor[e.relation]||'#888'}});
+      }
+    });
+    cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000,
+               animate:true, animationDuration:1500}).run();
   }catch(e){ console.error('加载失败:', e); }
 }
 async function addEntityEdges(name){
@@ -797,7 +806,28 @@ loadGalaxy();
         out = sorted(nodes.values(),
                      key=lambda x: (x["edges"] + x["in_degree"] * 2,
                                     x["energy"]), reverse=True)
-        self._json(out[:120])
+        node_list = out[:120]
+
+        # ★ 全量连线: 节点之间的命名边 (群星漂浮 + 线连接)
+        api_conn = sqlite3_mod.connect('D:/AM/HiveMind_repo/src/asteriamind.db')
+        api_conn.execute('PRAGMA busy_timeout = 5000')
+        api_conn.execute(
+            "CREATE TEMP TABLE _n2 AS SELECT rowid FROM directed_edges "
+            "WHERE relation IN " + NAMED)
+        all_edges = api_conn.execute(
+            f"SELECT de.source, de.relation, de.target "
+            f"FROM directed_edges de JOIN _n2 ON de.rowid=_n2.rowid "
+            f"WHERE de.source IN (SELECT source FROM directed_edges "
+            f"JOIN _n2 ON directed_edges.rowid=_n2.rowid GROUP BY source) "
+            f"AND LENGTH(de.source)<=6 AND LENGTH(de.target)<=6").fetchall()
+        api_conn.execute("DROP TABLE _n2")
+        api_conn.close()
+        node_ids = {n["entity"] for n in node_list}
+        edges = [{"source": s, "relation": r, "target": t}
+                 for s, r, t in all_edges
+                 if s in node_ids and t in node_ids]
+
+        self._json({"nodes": node_list, "edges": edges})
 
     def _handle_vector(self, word: str):
         """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层)
