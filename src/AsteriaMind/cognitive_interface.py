@@ -710,7 +710,7 @@ class CognitiveInterface:
         from AsteriaMind.dream_module import DreamModule
         self.dream_module = DreamModule(self.cognitive_star_map)
 
-        # OfflineLearner: 离线学习循环 (AM 闲时自主学习)
+        # OfflineLearner: 离线学习循环 (AM 闲时自主学习, 好奇心引擎)
         from AsteriaMind.offline_learner import OfflineLearner
         self.offline_learner = OfflineLearner(
             star_map=self.cognitive_star_map,
@@ -718,6 +718,7 @@ class CognitiveInterface:
             dream_module=self.dream_module,
             active_learner=self.active_learner,
             critic=self.critic,
+            concept=self.concept,  # ★ v3.7: 概念层缺口想法源
         )
 
         # ── v3.3: 反映射闭环 ──

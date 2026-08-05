@@ -29,12 +29,13 @@ class OfflineLearner:
 
     def __init__(self, star_map=None, active_inference=None,
                  dream_module=None, active_learner=None,
-                 budget_contest=None, critic=None):
+                 budget_contest=None, critic=None, concept=None):
         self.star_map = star_map
         self.active_inference = active_inference
         self.dream_module = dream_module
         self.active_learner = active_learner
         self.critic = critic
+        self.concept = concept  # ★ v3.7: 概念层 (缺口想法源)
         self.budget_contest = budget_contest or BudgetContest(
             max_winners=2, monopoly_limit=3, random_explore_chance=0.10
         )
@@ -42,6 +43,17 @@ class OfflineLearner:
         self.total_runs = 0
         self.total_learned = 0
         self.history: list[dict] = []
+        # ★ v3.7: 学习效果反馈 — learner_id → [胜, 总] (好奇心闭环)
+        self._track: dict[str, list] = {}
+
+    def _track_for(self, learner_id: str, default: float = 0.4) -> float:
+        """历史学习效果 → track_record (样本少用默认)"""
+        w, t = self._track.get(learner_id, (0, 0))
+        return default if t < 3 else w / t
+
+    def _bump_track(self, learner_id: str, won: bool):
+        w, t = self._track.get(learner_id, (0, 0))
+        self._track[learner_id] = [w + (1 if won else 0), t + 1]
 
     def run_cycle(self) -> dict:
         """
@@ -67,7 +79,7 @@ class OfflineLearner:
                 expected_value=max(0.3, 1.0 - conf),
                 cost=1.0 + (1.0 - conf) * 2.0,
                 uncertainty_source="low_conf",
-                track_record=0.3,
+                track_record=self._track_for(f"scan_{subj}", 0.3),
             ))
 
         # ── 1.5 ★ v3.6: 批判者 — 高熵实体优先学 ──
@@ -80,8 +92,32 @@ class OfflineLearner:
                     expected_value=t["entropy"],
                     cost=1.0,
                     uncertainty_source="high_entropy",
-                    track_record=0.5,
+                    track_record=self._track_for(f"critic_{t['entity']}", 0.5),
                 ))
+
+        # ── 1.8 ★ v3.7: 概念层缺口 — 词表有语义位置, 星图无命名知识 ──
+        if self.concept:
+            try:
+                named = {r[0] for r in self.star_map.conn.execute(
+                    "SELECT DISTINCT source FROM directed_edges "
+                    "WHERE relation IN ('IS_A','CAN','HAS','EATS','LIVES_IN')").fetchall()}
+                vocab = self.concept.vocab()
+                gaps = [w for w in vocab
+                        if w not in named and len(w) >= 2]
+                import random
+                random.shuffle(gaps)
+                for w in gaps[:5]:
+                    proposals.append(ExplorationProposal(
+                        learner_id=f"gap_{w}",
+                        query=f"{w} 是什么",
+                        hypothesis="概念层有语义位置, 星图无命名知识 (缺口)",
+                        expected_value=0.7,
+                        cost=1.2,
+                        uncertainty_source="concept_gap",
+                        track_record=self._track_for(f"gap_{w}", 0.4),
+                    ))
+            except Exception:
+                pass
 
         # ── 2. 从 DreamModule 收集假说 ──
         if self.dream_module:
@@ -94,7 +130,8 @@ class OfflineLearner:
                     expected_value=hyp.get("confidence", 0.2),
                     cost=0.5,
                     uncertainty_source="structure_gap",
-                    track_record=self._strategy_track_record(hyp.get("strategy")),
+                    track_record=self._track_for(
+                        f"dream_{hyp.get('strategy', 'unknown')}"),
                 ))
 
         # ── 3. 从星图找孤立节点 ──
@@ -108,7 +145,7 @@ class OfflineLearner:
                     expected_value=0.6,
                     cost=0.8,
                     uncertainty_source="structure_gap",
-                    track_record=0.4,
+                    track_record=self._track_for(f"orphan_{entity}", 0.4),
                 ))
 
         result["proposals"] = len(proposals)
@@ -150,26 +187,37 @@ class OfflineLearner:
         return result
 
     def _execute_learning(self, proposal: ExplorationProposal) -> bool:
-        """执行一个学习任务: 解析 query → ActiveLearner 查询 → 存星图"""
+        """执行一个学习任务: 解析 query → ActiveLearner 查询 → 存星图
+
+        v3.7: 单实体查询 (是什么类) 用 learn_word; 三元组用 learn_relation
+              学习效果反馈 → _bump_track (好奇心闭环)
+        """
         if not self.active_learner:
             return False
 
-        # 从 query 解析三元组
         parts = proposal.query.split()
         subj = parts[0] if parts else ""
-        pred = parts[1] if len(parts) > 1 else "IS_A"
-        obj = parts[2] if len(parts) > 2 else ""
-
         if not subj or subj == "?":
             return False
 
-        result = self.active_learner.learn_relation(subj, pred, obj)
+        # 单实体想法 (高熵/概念缺口/孤立) → 查定义; 三元组 → 验证关系
+        if proposal.uncertainty_source in ("high_entropy", "concept_gap",
+                                           "orphan") or len(parts) <= 1:
+            result = self.active_learner.learn_word(subj)
+            learned = bool(result.get("known") and result.get("source")
+                           in ("web_search", "star_map"))
+        else:
+            pred = parts[1] if len(parts) > 1 else "IS_A"
+            obj = parts[2] if len(parts) > 2 else ""
+            result = self.active_learner.learn_relation(subj, pred, obj)
+            learned = bool(result.get("learned"))
 
-        if result.get("learned"):
+        # ★ v3.7: 学习效果反馈 — 学到涨 track, 学不到降 (下次竞标更聪明)
+        self._bump_track(proposal.learner_id, learned)
+        if learned:
             if self.active_inference:
                 self.active_inference.update_from_feedback(subj, pred, obj, True)
             return True
-
         return False
 
     def _store_hypothesis(self, proposal: ExplorationProposal):
