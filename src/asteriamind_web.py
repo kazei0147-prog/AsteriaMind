@@ -250,8 +250,8 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 <h1>🧠 AsteriaMind 知识能量视图</h1>
 <h2>能量代谢 — 哪里热(活跃), 哪里冷(冬眠), 哪里新(成长)</h2>
 <div class="card"><div id="stats"></div></div>
-<div class="card"><h3>🔥 活跃实体 (知识热区)</h3><div id="hot"></div></div>
 <div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
+<div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
 <div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
 <div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
 <script>
@@ -266,15 +266,13 @@ async function load(){
       '<span class="stat">冷边 <b class="'+(s.cold_count>0?'cold':'')+'">'+s.cold_count+'</b></span>';
     const colors = ['#d29922','#e3b341','#58a6ff','#3fb950','#a371f7','#f0883e','#39c5cf','#f85149'];
     let maxE = Math.max(1, ...d.hot.map(x=>x.energy));
-    document.getElementById('hot').innerHTML = d.hot.map(x=>
-      '<div class="bar" style="width:'+(40+60*x.energy/maxE)+'%;background:'+colors[Math.floor(Math.random()*colors.length)]+'">'
-      +x.entity+' · '+x.edges+'边 · E'+x.energy+'</div>').join('');
     document.getElementById('cold').innerHTML = d.cold.length ? d.cold.map(x=>
       '<span class="tag cold">'+x.source+' ['+x.relation+'] '+x.target+' E'+x.energy+'</span>').join('')
       : '<span style="color:#3fb950">✅ 无冷边 — 知识能量健康</span>';
     document.getElementById('fresh').innerHTML = d.fresh.length ? d.fresh.map(x=>
       '<span class="tag">'+x.source+' ['+x.relation+'] '+x.target+'</span>').join('')
       : '<span style="color:#8b949e">近24h 无新增</span>';
+    // 删除 hot/assoc 渲染 (暂未启用以避免 GROUP BY 慢查询)
     document.getElementById('rel').innerHTML = d.relation_dist.map(x=>
       '<span class="tag">'+x.relation+' ×'+x.count+'</span>').join('');
   }catch(e){ document.getElementById('stats').innerHTML='<span style="color:#f85149">加载失败: '+e+'</span>'; }
@@ -418,26 +416,22 @@ load(); setInterval(load, 5000);
         self._json(health)
 
     def _handle_graph(self):
-        """★ v3.6: 知识能量视图 (③) — 星图热力数据
+        """★ v3.6: 知识能量视图 (③) — 星图热力数据 (简化版)
 
+        排除 GROUP BY 全表扫描 (700万 co_text 上 GROUP BY 慢)
         返回:
-          hot:   高能量命名实体 (知识活跃区)
-          cold:  低能量/衰减边 (知识冬眠区)
-          fresh: 最近新增的命名边 (成长区)
-          stats: 星图健康指标
+          cold:    低能量命名边 (无 GROUP BY, 快)
+          fresh:   最近新增边 (无 GROUP BY)
+          named_stats: 关系分布 (GROUP BY 限定命名边, 已加索引)
+          totals:   星图总数
         """
-        star = ci.mother.star_map
-        conn = star.conn
-        now = time.time()
+        # 用专用连接, 不与后台线程争锁
+        import sqlite3 as sqlite3_mod
+        api_conn = sqlite3_mod.connect('D:/AM/HiveMind_repo/src/asteriamind.db')
+        api_conn.execute('PRAGMA busy_timeout = 5000')
+        conn = api_conn
 
-        # 活跃实体: 命名边多 + 能量高
-        hot = conn.execute(
-            "SELECT source, COUNT(*) as n, ROUND(AVG(COALESCE(energy,1.0)),2) as e "
-            "FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
-            "GROUP BY source ORDER BY n*e DESC LIMIT 15").fetchall()
-
-        # 冷边: 低能量命名边 (可能在学习中遗忘)
+        # 冷边: 命名边 + 低能量 (主键 (source,target,relation) 走索引快)
         cold = conn.execute(
             "SELECT source, relation, target, ROUND(COALESCE(energy,0),2) as e "
             "FROM directed_edges "
@@ -445,23 +439,23 @@ load(); setInterval(load, 5000);
             "AND COALESCE(energy,1.0) < 0.4 "
             "ORDER BY e ASC LIMIT 10").fetchall()
 
-        # 新鲜边: 最近 1 天新增
+        # 新鲜边: 命名边按 last_update DESC 走主键索引
         fresh = conn.execute(
             "SELECT source, relation, target FROM directed_edges "
-            "WHERE last_update > ? AND relation IN ('IS_A','CAN','NOT_CAN','HAS') "
-            "ORDER BY last_update DESC LIMIT 10", (now - 86400,)).fetchall()
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') "
+            "ORDER BY last_update DESC LIMIT 10").fetchall()
 
-        # 关系分布 + 健康
+        # 关系分布
         rel_dist = conn.execute(
             "SELECT relation, COUNT(*) FROM directed_edges "
             "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
             "GROUP BY relation").fetchall()
+        named_edges = sum(n for _, n in rel_dist)
         total_edges = conn.execute(
             "SELECT COUNT(*) FROM directed_edges").fetchone()[0]
-        named_edges = sum(n for _, n in rel_dist)
+        api_conn.close()
 
         self._json({
-            "hot": [{"entity": s, "edges": n, "energy": e} for s, n, e in hot],
             "cold": [{"source": s, "relation": r, "target": t, "energy": e}
                      for s, r, t, e in cold],
             "fresh": [{"source": s, "relation": r, "target": t}
