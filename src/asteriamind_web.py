@@ -212,6 +212,10 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/evidence":
             self._json(_last_evidence if _last_evidence else
                        {"question": "暂无回答记录", "edges": []})
+        elif self.path.startswith("/api/entity/"):
+            import urllib.parse as _up
+            entity = _up.unquote(self.path.split("/api/entity/")[1])
+            self._handle_entity(entity)
         else:
             self.send_error(404)
 
@@ -548,6 +552,59 @@ loadEvidence(); setInterval(loadEvidence, 5000);
                 "named_edges": named_edges,
                 "cold_count": len(cold),
             },
+        })
+
+    def _handle_entity(self, entity: str):
+        """★ v3.6: 实体详情 — 单个实体的关系网络 + 熵 + 能量
+
+        /api/entity/<名字> → 混合图谱的"数据卡"
+        """
+        import sqlite3 as sqlite3_mod
+        import math
+        ent = entity.strip()
+        api_conn = sqlite3_mod.connect('D:/AM/HiveMind_repo/src/asteriamind.db')
+        api_conn.execute('PRAGMA busy_timeout = 5000')
+
+        # 1. 命名边 (出边)
+        out_edges = api_conn.execute(
+            "SELECT relation, target, ROUND(COALESCE(energy,0),2), weight "
+            "FROM directed_edges WHERE source=? "
+            "AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "ORDER BY weight DESC LIMIT 15", (ent,)).fetchall()
+        # 2. 入边 (谁指向它)
+        in_edges = api_conn.execute(
+            "SELECT source, relation, ROUND(COALESCE(energy,0),2) "
+            "FROM directed_edges WHERE target=? "
+            "AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "ORDER BY weight DESC LIMIT 10", (ent,)).fetchall()
+        # 3. co_text 联想 (黑盒邻居)
+        assoc = api_conn.execute(
+            "SELECT target, ROUND(COALESCE(energy,0),2) FROM directed_edges "
+            "WHERE source=? AND relation='co_text' ORDER BY energy DESC LIMIT 8",
+            (ent,)).fetchall()
+        # 4. 熵 (知识模糊度)
+        rels = api_conn.execute(
+            "SELECT relation, COUNT(*) FROM directed_edges "
+            "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+            "GROUP BY relation", (ent,)).fetchall()
+        entropy = 0.0
+        total_n = sum(n for _, n in rels)
+        if total_n > 1:
+            h = 0.0
+            for _, n in rels:
+                p = n / total_n
+                h -= p * math.log(p) if p > 0 else 0
+            entropy = round(h / math.log(6), 2)
+        api_conn.close()
+
+        self._json({
+            "entity": ent,
+            "entropy": entropy,
+            "out_edges": [{"relation": r, "target": t, "energy": e, "weight": w}
+                          for r, t, e, w in out_edges],
+            "in_edges": [{"source": s, "relation": r, "energy": e}
+                         for s, r, e in in_edges],
+            "assoc": [{"target": t, "energy": e} for t, e in assoc],
         })
 
     def _extract_topic(self, text: str) -> str:
