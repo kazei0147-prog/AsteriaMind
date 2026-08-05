@@ -80,6 +80,7 @@ _last_rel = ""
 _last_verb = ""
 _last_action = ""
 _last_evidence = None  # ★ v3.6: 最近一次回答的证据链
+_VS_CACHE = None       # ★ v3.6: 向量空间单例 (避免每次请求重载 15万向量)
 
 # 从 DB 恢复已有知识
 for r in db.query():
@@ -220,6 +221,10 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._handle_entity(entity)
         elif self.path == "/api/galaxy":
             self._handle_galaxy()
+        elif self.path.startswith("/api/vector/"):
+            import urllib.parse as _upv
+            w = _upv.unquote(self.path.split("/api/vector/")[1])
+            self._handle_vector(w)
         else:
             self.send_error(404)
 
@@ -739,6 +744,25 @@ loadGalaxy();
             "GROUP BY source ORDER BY n DESC LIMIT 120").fetchall()
         api_conn.close()
         self._json([{"entity": s, "edges": n, "energy": e} for s, n, e in rows])
+
+    def _handle_vector(self, word: str):
+        """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层)
+
+        返回: {word, neighbors: [{word, sim}], analogies: [...]}
+        """
+        global _VS_CACHE
+        try:
+            if _VS_CACHE is None:
+                from AsteriaMind.vector_space import VectorSpace
+                _VS_CACHE = VectorSpace()
+            ns = _VS_CACHE.neighbors(word, 10)
+            self._json({
+                "word": word,
+                "neighbors": [{"word": w, "sim": round(s, 3)} for w, s in ns],
+            })
+        except Exception as e:
+            self._json({"word": word, "error": str(e)[:120],
+                        "neighbors": []})
 
     def _handle_entity(self, entity: str):
         """★ v3.6: 实体详情 — 单个实体的关系网络 + 熵 + 能量
