@@ -190,6 +190,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._serve_html()
         elif self.path == "/dashboard":
             self._serve_dashboard()
+        elif self.path == "/graph":
+            self._serve_graph_page()
         elif self.path == "/api/stats":
             ol_summary = ci.offline_learner.summary() if ci.offline_learner else {}
             self._json({
@@ -226,6 +228,63 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(CHAT_HTML.encode('utf-8'))
+
+    def _serve_graph_page(self):
+        """★ v3.6: 知识能量视图 (③) — 星图热力仪表盘"""
+        html = """<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="5">
+<title>AM 知识能量视图</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px}
+h1{font-size:20px;color:#58a6ff;margin:0 0 4px}
+h2{font-size:14px;color:#8b949e;font-weight:400;margin:0 0 20px}
+h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:16px}
+.bar{height:20px;border-radius:4px;margin:4px 0;display:flex;align-items:center;padding:0 8px;font-size:12px;color:#fff;white-space:nowrap;overflow:hidden}
+.tag{display:inline-block;background:#21262d;border:1px solid #30363d;border-radius:4px;padding:2px 8px;margin:3px;font-size:12px}
+.cold{color:#f85149}
+.stat{display:inline-block;margin-right:24px;font-size:13px}
+.stat b{font-size:20px;color:#58a6ff}
+</style></head><body>
+<h1>🧠 AsteriaMind 知识能量视图</h1>
+<h2>能量代谢 — 哪里热(活跃), 哪里冷(冬眠), 哪里新(成长)</h2>
+<div class="card"><div id="stats"></div></div>
+<div class="card"><h3>🔥 活跃实体 (知识热区)</h3><div id="hot"></div></div>
+<div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
+<div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
+<div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
+<script>
+async function load(){
+  try{
+    const r = await fetch('/api/graph');
+    const d = await r.json();
+    const s = d.stats;
+    document.getElementById('stats').innerHTML =
+      '<span class="stat">总边 <b>'+s.total_edges.toLocaleString()+'</b></span>'+
+      '<span class="stat">命名边 <b>'+s.named_edges+'</b></span>'+
+      '<span class="stat">冷边 <b class="'+(s.cold_count>0?'cold':'')+'">'+s.cold_count+'</b></span>';
+    const colors = ['#d29922','#e3b341','#58a6ff','#3fb950','#a371f7','#f0883e','#39c5cf','#f85149'];
+    let maxE = Math.max(1, ...d.hot.map(x=>x.energy));
+    document.getElementById('hot').innerHTML = d.hot.map(x=>
+      '<div class="bar" style="width:'+(40+60*x.energy/maxE)+'%;background:'+colors[Math.floor(Math.random()*colors.length)]+'">'
+      +x.entity+' · '+x.edges+'边 · E'+x.energy+'</div>').join('');
+    document.getElementById('cold').innerHTML = d.cold.length ? d.cold.map(x=>
+      '<span class="tag cold">'+x.source+' ['+x.relation+'] '+x.target+' E'+x.energy+'</span>').join('')
+      : '<span style="color:#3fb950">✅ 无冷边 — 知识能量健康</span>';
+    document.getElementById('fresh').innerHTML = d.fresh.length ? d.fresh.map(x=>
+      '<span class="tag">'+x.source+' ['+x.relation+'] '+x.target+'</span>').join('')
+      : '<span style="color:#8b949e">近24h 无新增</span>';
+    document.getElementById('rel').innerHTML = d.relation_dist.map(x=>
+      '<span class="tag">'+x.relation+' ×'+x.count+'</span>').join('');
+  }catch(e){ document.getElementById('stats').innerHTML='<span style="color:#f85149">加载失败: '+e+'</span>'; }
+}
+load(); setInterval(load, 5000);
+</script></body></html>"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
 
     def _serve_dashboard(self):
         """简单仪表盘——实时 KG 数据"""
