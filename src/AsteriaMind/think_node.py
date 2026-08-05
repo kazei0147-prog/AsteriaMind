@@ -16,6 +16,27 @@ ThinkNode — 问题理解与查询策略规划 (AsteriaMind v3.6)
 
 import re
 
+# ★ v3.7: 完整概念词表缓存 (word_vectors) — 长词优先提取主语
+_VOCAB_CACHE = None
+_QUERY_WORDS = frozenset(
+    '什么 怎么 哪里 为什么 是不是 会不会 如何 多少 哪些 什么样 是否 为什么'
+    '是什么 什么是 有什么 有哪些 怎么样 怎么回事 什么时候'.split())
+
+
+def _get_vocab(star_map):
+    """向量词表 → 集合 (模块级缓存, 完整概念词优先匹配)"""
+    global _VOCAB_CACHE
+    if _VOCAB_CACHE is None:
+        _VOCAB_CACHE = set()
+        try:
+            for (w,) in star_map.conn.execute(
+                    "SELECT word FROM word_vectors").fetchall():
+                if len(w) >= 2:
+                    _VOCAB_CACHE.add(w)
+        except Exception:
+            pass
+    return _VOCAB_CACHE
+
 
 class ActionPlan:
     """ThinkNode 的决策输出"""
@@ -122,6 +143,13 @@ class ThinkNode:
         if named_count >= 2:
             return ActionPlan("DIRECT", subject, relation_hints=[rel_hint])
 
+        # ── 3.5 类群概念检查: X 被多个实体 IS_A 指向 → 问"X是什么"答 X 本身 ──
+        #    "甲壳动物是什么" → 甲壳动物被螃蟹/龙虾/虾归类 → SEARCH 查定义
+        #    而不是反推成成员 (答虾) — REVERSE 只适合属性词 (羽毛→鸟类)
+        if rel_hint == "IS_A" and self._count_in_is_a(subject) >= 2:
+            return ActionPlan("SEARCH", subject, relation_hints=[rel_hint],
+                              search_query=subject)
+
         # ── 4. 无直接边 — 尝试反向推理 ──
         reversed_sources = self._find_reverse_sources(subject)
         if reversed_sources:
@@ -153,11 +181,24 @@ class ThinkNode:
         return ActionPlan("SEARCH", "", search_query=clean)
 
     def _extract_subject(self, text: str) -> str:
-        """滑动窗口提取实体 (1-3字)"""
+        """提取实体 — 完整概念词优先 (甲壳动物 ≠ 动物)
+
+        v3.7: 先用向量词表做最长匹配 (jieba 分词结果 = 完整概念),
+        回退到原滑动窗口 (命名边 source 匹配)
+        """
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
+        # ★ v3.7: 向量词表最长匹配 — "甲壳动物是什么" → "甲壳动物"
+        vocab = _get_vocab(self.star_map)
+        if vocab:
+            for w in range(min(8, len(clean)), 1, -1):
+                for i in range(len(clean) - w + 1):
+                    kw = clean[i:i + w]
+                    if kw in vocab and kw not in _QUERY_WORDS:
+                        return kw
+        # 回退: 原滑动窗口 (命名边 source 匹配)
         for w in (3, 2, 1):
             for i in range(len(clean) - w + 1):
-                kw = clean[i:i+w]
+                kw = clean[i:i + w]
                 if kw in ('什么', '怎么', '哪里', '为什么', '是不是', '会不会'):
                     continue
                 c = self.star_map.conn.execute(
@@ -176,6 +217,12 @@ class ThinkNode:
             "SELECT COUNT(*) FROM directed_edges WHERE source=? "
             "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS')",
             (subject,)).fetchone()[0]
+
+    def _count_in_is_a(self, subject: str) -> int:
+        """IS_A 入度: 被多少实体归类 (类群概念信号)"""
+        return self.star_map.conn.execute(
+            "SELECT COUNT(*) FROM directed_edges WHERE target=? "
+            "AND relation='IS_A'", (subject,)).fetchone()[0]
 
     def _find_reverse_sources(self, target: str) -> list[str]:
         """反推: 谁指向 target?"""

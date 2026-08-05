@@ -1117,7 +1117,37 @@ loadGalaxy();
                         "clarify", {})
 
             if plan.strategy == "SEARCH":
-                # ★ v3.6: 软证据 — 先问联想, 有相关词就不无脑搜索 ★
+                # ★ v3.7: 向量类比推理优先 — 语义近亲 (完整概念) 比碎片共现可靠
+                global _VS_CACHE
+                try:
+                    if _VS_CACHE is None:
+                        from AsteriaMind.vector_space import VectorSpace
+                        _VS_CACHE = VectorSpace()
+                    q = plan.search_query
+                    for w, sim in _VS_CACHE.neighbors(q, top_k=5):
+                        if sim < 0.95:
+                            break  # 相似度饱和噪声多 (小语料), 宁可不用不可乱用
+                        # 近亲必须自己认识 (有命名知识可借)
+                        rel_edges = ci.mother.star_map.query_edges(
+                            w, text, space="belief", top_k=8)
+                        if not rel_edges:
+                            continue
+                        best = max(rel_edges, key=lambda e: e.get("salience", 0))
+                        rel_word = {"IS_A": "属于", "CAN": "能",
+                                    "NOT_CAN": "不能", "HAS": "有",
+                                    "EATS": "吃", "LIVES_IN": "生活在"}
+                        rw = rel_word.get(best["relation"], best["relation"])
+                        reply = (f"我没学过「{q[:8]}」，但它和「{w}」很像"
+                                 f"（相似度 {sim:.2f}），而「{w}」{rw}"
+                                 f"{best['target']}。我猜「{q[:8]}」大概也"
+                                 f"{rw}{best['target']}——不过这是我猜的，"
+                                 f"要是错了记得告诉我。")
+                        return (reply, "vector_transfer",
+                                {"similar_to": w, "sim": round(sim, 2),
+                                 "borrowed": best})
+                except Exception as e:
+                    print(f"向量类比失败: {e}")
+                # ★ v3.6: 软证据 — 其次问联想 (co_text 共现, 碎片多时质量一般)
                 soft = ci.mother.star_map.soft_evidence(plan.search_query, top_k=5)
                 if soft:
                     relates = "、".join(f"「{s['related']}」" for s in soft[:4])
