@@ -116,13 +116,20 @@ class ActiveLearner:
                     result["definition"] = r.snippet[:200]
                     result["confidence"] = 0.5
                     result["source"] = "web_search"
-                    # 存入 KG
-                    if self.kg:
-                        self.kg.add(word, "MEANS", r.snippet[:100],
-                                   confidence=0.5, source="web_search")
-                    # ★ v3.5: 能量扩散写入 — 搜索结果直接增强共现网
+                    # ★ v3.7: 汲取净化 — 只提取事实, 不再扩散全文 ★
+                    #   旧行为: kg.add(全文) + spread_write(整个snippet)
+                    #   污染: 广告词/导航词全进 co_text 联想层
                     if self.star_map:
-                        self.star_map.spread_write(r.snippet)
+                        try:
+                            from AsteriaMind.intake_purifier import IntakePurifier
+                            pur = IntakePurifier(self.star_map)
+                            pr = pur.ingest_web(word, r.title, r.snippet)
+                            if pr["stored"]:
+                                result["extracted"] = pr["stored"]
+                            if pr["rejected"]:
+                                result["reject_note"] = pr["note"]
+                        except Exception:
+                            pass
                     return result
             except Exception:
                 pass
@@ -273,14 +280,12 @@ class ActiveLearner:
                     f"online_learning: {fact.get('source_query', '')[:40]}"
                 )
 
-            # ★ v3.5: 搜索结果原始句子 → language_traces + 能量扩散写入
+            # ★ v3.5: 搜索结果原始句子 → language_traces (语言接触史, 学语用)
             self._store_search_sentences(all_search_results, subj, pred, obj)
 
-            # 能量扩散: 搜索结果中提取高频实词 → 两两建立共现连接
-            for r_item in all_search_results:
-                snippet = r_item.snippet if hasattr(r_item, 'snippet') else ""
-                if snippet and len(snippet) > 10:
-                    self.star_map.spread_write(snippet)
+            # ★ v3.7: 删除全文 spread_write 扩散
+            #   旧行为: 每个 snippet 全文进 co_text (广告/导航词污染联想层)
+            #   现在: 只存 _extract_facts 提取出的三元组 (上面 277 行已定向 store)
 
             result["learned"] = True
             result["source"] = "web_search"

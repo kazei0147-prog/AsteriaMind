@@ -1012,14 +1012,21 @@ loadGalaxy();
                             return (f"🧮 {r.get('result')}", "math", {})
                     return (f"🧮 我算不了「{target}」", "math_fail", {})
                 if action == "teach" and target:
-                    # 教我 X 是 Y → 存星图
+                    # 教我 X 是 Y → 汲取净化 (问句过滤 + 质量门) → 存星图
                     tm = re.match(r'(.+?)\s*(?:是|属于)\s*(.+)', target)
                     if tm:
-                        ci.mother.star_map.store(tm.group(1).strip(), "IS_A",
-                                                 tm.group(2).strip(), "confirmed",
-                                                 f"teach: {text[:40]}")
-                        return (f"📖 学会了：{tm.group(1).strip()} 是 {tm.group(2).strip()}",
-                                "teach", {})
+                        try:
+                            from AsteriaMind.intake_purifier import IntakePurifier
+                            pur = IntakePurifier(ci.mother.star_map)
+                            ok, msg = pur.ingest_teach(
+                                tm.group(1).strip(), "IS_A",
+                                tm.group(2).strip())
+                        except Exception:
+                            ok, msg = False, "教学失败"
+                        if ok:
+                            return (f"📖 学会了：{tm.group(1).strip()} 是 {tm.group(2).strip()}",
+                                    "teach", {})
+                        return (f"🤔 {msg}", "teach_reject", {})
                     return (f"🤔 想学「{target}」，但我不确定怎么记。"
                             f"试试 '教我 企鹅 是 鸟类' 这种格式？", "teach_unknown", {})
 
