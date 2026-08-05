@@ -81,6 +81,28 @@ _last_verb = ""
 _last_action = ""
 _last_evidence = None  # ★ v3.6: 最近一次回答的证据链
 _VS_CACHE = None       # ★ v3.6: 向量空间单例 (避免每次请求重载 15万向量)
+_LM_CACHE = None       # ★ v3.7: 统计语言模型单例 (她自己的句式池)
+
+
+def _speak_with_own_language(subj: str, edges: list) -> str:
+    """★ v3.7: 统计语言生成 — 从她读过的句子采样句式, 不写模板
+
+    edges: query_edges 返回的边 (含 relation/target/salience)
+    返回: 自然语言; 骨架池无匹配时返回 "" (由模板兜底)
+    """
+    global _LM_CACHE
+    try:
+        if _LM_CACHE is None:
+            from AsteriaMind.language_model import LanguageModel
+            _LM_CACHE = LanguageModel()
+            _LM_CACHE.mine(min_count=1)
+        edge_dicts = [{"source": subj, "relation": e["relation"],
+                       "target": e["target"]}
+                      for e in edges[:5]]
+        return _LM_CACHE.speak(edge_dicts, max_sent=4)
+    except Exception as e:
+        print(f"统计语言生成失败: {e}")
+        return ""
 
 # 从 DB 恢复已有知识
 for r in db.query():
@@ -1189,9 +1211,13 @@ loadGalaxy();
                         "unknown", {})
 
             edges = apply_intent_weight(edges, intent)
-            act = [{"node": e["target"], "energy": e["salience"],
-                    "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
-            narrative = lg._compose_narrative(subj, act, [], intent=intent)
+            # ★ v3.7: 统计语言生成 — 她自己的句式 (骨架池采样), 模板只兜底
+            narrative = _speak_with_own_language(subj, edges)
+            if not narrative:
+                act = [{"node": e["target"], "energy": e["salience"],
+                        "triggers": [e["relation"]], "degree": 0}
+                       for e in edges[:8]]
+                narrative = lg._compose_narrative(subj, act, [], intent=intent)
             # ★ v3.6: 批判者 — 熵高时诚实标注不确定性 ★
             critic_note = None
             if narrative and hasattr(ci, 'critic'):
