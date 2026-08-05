@@ -488,6 +488,15 @@ async function showCard(name){
         +'['+e.relation+'] '+e.target+'<span class="e">E'+e.energy+(e.energy<0.5?' ⚠':'')+'</span></div>';
     });
     if(!(d.out_edges||[]).length) html += '<div style="color:#8b949e">还没有命名知识边</div>';
+    html += '<div style="margin-top:10px;border-top:1px solid #30363d;padding-top:8px;font-size:11px;color:#8b949e">🧠 语义邻居 (向量黑盒联想)</div>';
+    try{
+      const v = await (await fetch('/api/vector/'+encodeURIComponent(name))).json();
+      if(v.neighbors && v.neighbors.length){
+        html += v.neighbors.slice(0,6).map(x=>'<span class="tag">'+x.word+'<small> '+x.sim.toFixed(2)+'</small></span>').join('');
+      } else {
+        html += '<div style="color:#8b949e">词表无此词 — 喂语料后会长出来</div>';
+      }
+    }catch(e){ html += '<div style="color:#8b949e">向量服务未启动</div>'; }
     card.innerHTML = html; card.style.display = 'block';
   }catch(e){ console.error(e); }
 }
