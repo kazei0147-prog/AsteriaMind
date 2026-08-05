@@ -64,38 +64,58 @@ class MemoryConsolidation:
         return result
 
     def _resolve_contradictions(self) -> int:
-        """每个矛盾: 保留能量最高的关系, 相反关系砍半
+        """每个矛盾: 保留证据强度高的关系, 相反关系降权
 
-        新结构: c["objects"] = [rel_a, rel_b]  (正反对, 如 [CAN, NOT_CAN])
-        保留能量高的那个, 砍掉相反的
+        ★ v3.6: 证据强度 = weight × confidence × energy
+          (不再是裸 energy — w=33 的真知识不该输给 w=1 的错知识)
+
+        ★ v3.6: 深度保护 — 降权有下限, 不砍到趋近 0
+          loser.energy = max(loser.energy*0.5, 0.2 * winner_weight)
+          → 确认 33 次的知识最低降到 0.2×33=6.6, 永远压过 w=1 的
         """
         resolved = 0
         for c in self.contradictions:
             subj, pred_pair, rels = c["subject"], c["predicate"], list(c["objects"])
-            obj = c.get("obj")  # 正反对共用同一个 obj (新检测逻辑按 subj+obj 分组)
-            if obj is None:
-                # 兼容: 旧结构按 pred 分组 — 直接跳过 (已由新检测替代)
+            obj = c.get("obj")  # 正反对共用同一个 obj
+            if obj is None or len(rels) < 2:
                 continue
-            if len(rels) < 2:
-                continue
-            # 查正反两条边的能量
+            # 查正反两条边的证据强度 (weight × confidence × energy)
             best_rel = None
-            best_energy = -1
+            best_strength = -1.0
+            winner_weight = 1
             for rel in rels:
                 e = self.star_map.conn.execute(
-                    "SELECT energy FROM directed_edges WHERE source=? AND relation=? AND target=?",
+                    "SELECT energy, weight, confidence FROM directed_edges "
+                    "WHERE source=? AND relation=? AND target=?",
                     (subj, rel, obj)).fetchone()
-                energy = e[0] if e else 0
-                if energy > best_energy:
-                    best_energy = energy
+                if not e:
+                    continue
+                energy, weight, conf = e
+                strength = (weight or 1) * (conf or 0.5) * (energy or 0.5)
+                if strength > best_strength:
+                    best_strength = strength
                     best_rel = rel
-            # 胜者保留, 败者砍半
+                    winner_weight = weight or 1
+            if best_rel is None:
+                continue
+            # 败者降权, 有下限 (深度保护: 按败者自己的证据深度)
+            # loser.energy = max(loser.energy*0.5, 0.2*loser.weight)
+            # → w=33 的知识最多降到 6.6, 不会被 w=1 的压死
+            # → 降权只降不升 (max 不会把低能量拉高)
             for rel in rels:
                 if rel != best_rel:
-                    self.star_map.conn.execute(
-                        "UPDATE directed_edges SET energy=energy*0.5 "
+                    loser = self.star_map.conn.execute(
+                        "SELECT energy, weight FROM directed_edges "
                         "WHERE source=? AND relation=? AND target=?",
-                        (subj, rel, obj))
+                        (subj, rel, obj)).fetchone()
+                    if not loser:
+                        continue
+                    loser_energy, loser_weight = loser
+                    floor = 0.2 * (loser_weight or 1)
+                    self.star_map.conn.execute(
+                        "UPDATE directed_edges SET energy=MAX(energy*0.5, ?) "
+                        "WHERE source=? AND relation=? AND target=?",
+                        (floor, subj, rel, obj))
                     resolved += 1
         if resolved:
             self.star_map.conn.commit()
