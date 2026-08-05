@@ -257,6 +257,7 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 <div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
 <div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
 <div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
+<div class="card"><h3>🌫️ 熵云 (知识模糊区 — 越虚越不确定)</h3><div id="entropy"></div></div>
 <div class="card"><h3>🔗 最近回答的证据链 (她凭什么这么说)</h3><div id="evidence"></div></div>
 <script>
 async function load(){
@@ -278,6 +279,12 @@ async function load(){
     // 删除 hot/assoc 渲染 (暂未启用以避免 GROUP BY 慢查询)
     document.getElementById('rel').innerHTML = d.relation_dist.map(x=>
       '<span class="tag">'+x.relation+' ×'+x.count+'</span>').join('');
+    document.getElementById('entropy').innerHTML = (d.entropy_cloud||[]).length ? d.entropy_cloud.map(x=>{
+      const blur = Math.min(3, Math.round((x.entropy-0.5)*6));  // 熵越高越模糊
+      const red = Math.min(255, Math.round((x.entropy-0.5)*400));
+      return '<span class="tag" style="color:rgb('+red+',80,80);filter:blur('+blur+'px)">'
+        +x.entity+' H'+x.entropy+'</span>';
+    }).join('') : '<span style="color:#3fb950">✅ 无高熵实体 — 知识清晰</span>';
   }catch(e){ document.getElementById('stats').innerHTML='<span style="color:#f85149">加载失败: '+e+'</span>'; }
 }
 async function loadEvidence(){
@@ -476,6 +483,13 @@ loadEvidence(); setInterval(loadEvidence, 5000);
         named_edges = sum(n for _, n in rel_dist)
         total_edges = conn.execute(
             "SELECT COUNT(*) FROM directed_edges").fetchone()[0]
+
+        # ★ v3.6: 熵云 — 高熵实体 (知识模糊区), 复用 CriticModule
+        entropy_cloud = []
+        if hasattr(ci, 'critic') and ci.critic:
+            ent = ci.critic.scan_uncertain(top_k=12)
+            entropy_cloud = [{"entity": e["entity"], "entropy": round(e["entropy"], 2)}
+                             for e in ent]
         api_conn.close()
 
         self._json({
@@ -484,6 +498,7 @@ loadEvidence(); setInterval(loadEvidence, 5000);
             "fresh": [{"source": s, "relation": r, "target": t}
                       for s, r, t in fresh],
             "relation_dist": [{"relation": r, "count": n} for r, n in rel_dist],
+            "entropy_cloud": entropy_cloud,
             "stats": {
                 "total_edges": total_edges,
                 "named_edges": named_edges,
