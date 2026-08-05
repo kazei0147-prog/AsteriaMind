@@ -320,8 +320,8 @@ async function loadEvidence(){
     document.getElementById('evidence').innerHTML = html;
   }catch(e){ document.getElementById('evidence').innerHTML='<span style="color:#f85149">证据链加载失败</span>'; }
 }
-load(); setInterval(load, 5000);
-loadEvidence(); setInterval(loadEvidence, 5000);
+load(); setInterval(load, 10000);
+loadEvidence(); setInterval(loadEvidence, 10000);
 async function exploreEntity(){
   const ent = document.getElementById('entInput').value.trim();
   if(!ent) return;
@@ -528,11 +528,12 @@ async function exploreEntity(){
 
         # ★ v3.6: 熵云 — 高熵实体 (知识模糊区)
         # 直接用 api_conn 计算, 不碰 ci.critic (它锁共享连接, 会死锁!)
+        # 限 200 实体 (够用, 不再 5s+)
         entropy_cloud = []
         import math
         entities = api_conn.execute(
             "SELECT DISTINCT source FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') LIMIT 500").fetchall()
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') LIMIT 200").fetchall()
         for (e,) in entities:
             rels = api_conn.execute(
                 "SELECT relation, COUNT(*) FROM directed_edges "
