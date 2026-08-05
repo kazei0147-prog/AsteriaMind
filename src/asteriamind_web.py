@@ -257,6 +257,10 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 </style></head><body>
 <h1>🧠 AsteriaMind 知识能量视图</h1>
 <h2>能量代谢 — 哪里热(活跃), 哪里冷(冬眠), 哪里新(成长)</h2>
+<div class="card"><h3>🕸️ 实体浏览器 (点实体 → 星形展开 + 数据卡)</h3>
+<div style="margin-bottom:8px"><input id="entInput" placeholder="输入实体名, 如 企鹅/蛇/鸟类" style="background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 10px;width:220px">
+<button onclick="exploreEntity()" style="background:#238636;border:none;color:#fff;border-radius:6px;padding:6px 14px;cursor:pointer">展开</button></div>
+<div id="starMap" style="min-height:180px;position:relative"></div></div>
 <div class="card"><div id="stats"></div></div>
 <div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
 <div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
@@ -318,6 +322,34 @@ async function loadEvidence(){
 }
 load(); setInterval(load, 5000);
 loadEvidence(); setInterval(loadEvidence, 5000);
+async function exploreEntity(){
+  const ent = document.getElementById('entInput').value.trim();
+  if(!ent) return;
+  try{
+    const r = await fetch('/api/entity/'+encodeURIComponent(ent));
+    const d = await r.json();
+    const box = document.getElementById('starMap');
+    const cx = 300, cy = 110;
+    let html = '<div style="text-align:center;margin-bottom:6px"><span style="color:#58a6ff;font-size:16px;font-weight:500">'+d.entity+'</span>'
+      +' <span style="color:#8b949e">熵 H'+d.entropy+'</span></div>';
+    const rels = d.out_edges||[];
+    rels.forEach((e,i)=>{
+      const ang = (2*Math.PI*i)/Math.max(rels.length,1) - Math.PI/2;
+      const x = cx + 130*Math.cos(ang), y = cy + 80*Math.sin(ang);
+      const color = e.relation.indexOf('NOT')>=0 ? '#f85149' : '#3fb950';
+      html += '<svg style="position:absolute;left:0;top:0;width:100%;height:100%" viewBox="0 0 600 220">'
+        +'<line x1="'+cx+'" y1="'+cy+'" x2="'+x+'" y2="'+y+'" stroke="'+color+'" stroke-width="1.5" stroke-dasharray="'+(e.energy<0.5?'4 3':'none')+'"/>'
+        +'<text x="'+(cx+x)/2+'" y="'+(cy+y)/2-4+'" fill="#d29922" font-size="11" text-anchor="middle">['+e.relation+']</text>'
+        +'<circle cx="'+cx+'" cy="'+cy+'" r="18" fill="#1f6feb" stroke="#58a6ff" stroke-width="1"/>'
+        +'<circle cx="'+x+'" cy="'+y+'" r="12" fill="#21262d" stroke="'+color+'" stroke-width="1" cursor="pointer" onclick="document.getElementById(\'entInput\').value=\''+e.target+'\';exploreEntity()"/>'
+        +'<text x="'+x+'" y="'+y+'" fill="#e6edf3" font-size="10" text-anchor="middle" dominant-baseline="central">'+e.target+'</text>'
+        +'</svg>';
+    });
+    if(rels.length) html += '<div style="position:absolute;left:0;top:180px;font-size:11px;color:#8b949e">点击外圈实体可继续展开 — 虚线=低能量边</div>';
+    if(!rels.length) html += '<div style="color:#8b949e;text-align:center;padding:30px">「'+d.entity+'」还没有命名知识边 — 教教她吧</div>';
+    box.innerHTML = html;
+  }catch(e){ document.getElementById('starMap').innerHTML='<span style="color:#f85149">展开失败: '+e+'</span>'; }
+}
 </script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
