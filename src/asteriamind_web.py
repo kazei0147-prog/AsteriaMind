@@ -1825,6 +1825,34 @@ if __name__ == "__main__":
 
     threading.Thread(target=_offline_learn_loop, daemon=True).start()
 
+    # ── ★ v3.7: RSS 送饭循环 — 每 6 小时自动喂语料 ──
+    def _rss_loop():
+        from AsteriaMind.rss_feeder import RSSFeeder
+        import sqlite3 as _sq
+        # 启动时先喂一次 (服务器起来就有饭)
+        first = True
+        while True:
+            try:
+                if not first:
+                    time.sleep(6 * 3600)  # 6 小时一餐
+                first = False
+                feeder = RSSFeeder(star_map=ci.mother.star_map)
+                stats = feeder.feed(max_items=20)
+                if stats.get("new", 0) > 0:
+                    print(f"\n  📡 RSS 送饭: 新喂 {stats['new']} 条 "
+                          f"(源{stats['sources']} 重复{stats['dup']} "
+                          f"失败{stats['errors']})")
+                    # 喂完触发离线学习 (新词 → 概念缺口 → 她主动学)
+                    try:
+                        ci.offline_learner.run_cycle()
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"  ⚠️ RSS feed error: {e}")
+                time.sleep(1800)  # 失败半小时后重试
+
+    threading.Thread(target=_rss_loop, daemon=True).start()
+
     port = 8866
     print(f"\n╔══════════════════════════════╗")
     print(f"║  🧠 AsteriaMind Web Chat    ║")
