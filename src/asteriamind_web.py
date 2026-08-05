@@ -419,6 +419,7 @@ const cy = cytoscape({
       'text-margin-y':6,'border-width':1,'border-color':'rgba(255,255,255,0.3)'
     }},
     {selector:'node.hot', style:{'border-width':3,'border-color':'#f0883e'}},
+    {selector:'node.hub', style:{'border-width':3,'border-color':'#d4af37'}},
     {selector:'edge', style:{
       'width':1.5,'line-color':'data(color)','target-arrow-shape':'triangle',
       'target-arrow-color':'data(color)','curve-style':'bezier',
@@ -438,12 +439,17 @@ async function loadGalaxy(){
     const maxE = Math.max(...gal.map(g=>g.energy));
     const cloud = (await (await fetch('/api/graph')).json()).entropy_cloud || [];
     const hotEnts = new Set(cloud.map(c=>c.entity));
-    const nodes = gal.map(g=>({
-      data:{id:g.entity, label:g.entity,
-            size:Math.max(20, Math.min(70, 18+26*g.energy/maxE)),
-            color: hotEnts.has(g.entity) ? '#f0883e' : '#58a6ff'},
-      classes: hotEnts.has(g.entity) ? 'hot' : ''
-    }));
+    const nodes = gal.map(g=>{
+      // 中枢节点 (分类词): 金色 + 按入度放大 (自动涌现的分类枢纽)
+      const hub = g.is_hub;
+      const weight = g.edges + (g.in_degree||0)*2;
+      return {
+        data:{id:g.entity, label:g.entity,
+              size:Math.max(20, Math.min(80, 18+30*weight/(maxE*2+2))),
+              color: hub ? '#d4af37' : (hotEnts.has(g.entity) ? '#f0883e' : '#58a6ff')},
+        classes: (hub?'hub ':'')+(hotEnts.has(g.entity)?'hot':'')
+      };
+    });
     cy.add(nodes);
     cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}).run();
     // 预加载 top 6 实体的关系 (让星系一开始就有边)
@@ -739,20 +745,59 @@ loadGalaxy();
         })
 
     def _handle_galaxy(self):
-        """★ v3.6: 星系视图数据 — 全部命名实体 + 能量 (节点大小/亮度)
+        """★ v3.6: 星系视图数据 — 实体 + 能量 + 分类中枢 (自动涌现)
 
-        返回: [{entity, edges, energy}, ...] 按能量降序
+        返回: [{entity, edges, energy, in_degree, is_hub}, ...]
+        中枢 = IS_A 被 ≥2 个实体指向的 target (行星/大洲/水果...)
+        分类中枢不需要人工建 — 统计涌现, 学了知识自动长出来
+
+        性能: temp 表预筛命名边 rowid (走部分索引), 聚合 15 倍提速
         """
         import sqlite3 as sqlite3_mod
         api_conn = sqlite3_mod.connect('D:/AM/HiveMind_repo/src/asteriamind.db')
         api_conn.execute('PRAGMA busy_timeout = 5000')
+
+        NAMED = "('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A')"
+
+        # 预筛命名边 rowid → temp 表 (部分索引 313 行, 避免 700 万全扫)
+        api_conn.execute(
+            "CREATE TEMP TABLE _n AS SELECT rowid FROM directed_edges "
+            "WHERE relation IN " + NAMED)
+        # 实体 (source 维度): 出边数 + 能量
         rows = api_conn.execute(
-            "SELECT source, COUNT(*) as n, ROUND(SUM(COALESCE(energy,1.0)),1) as e "
-            "FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
-            "GROUP BY source ORDER BY n DESC LIMIT 120").fetchall()
+            f"SELECT de.source, COUNT(*), ROUND(SUM(COALESCE(de.energy,1.0)),1) "
+            f"FROM directed_edges de JOIN _n ON de.rowid=_n.rowid "
+            f"GROUP BY de.source").fetchall()
+        # 分类中枢: IS_A 被指向 ≥2 次 = 涌现的分类词
+        hubs = api_conn.execute(
+            "SELECT de.target, COUNT(*) FROM directed_edges de "
+            "JOIN _n ON de.rowid=_n.rowid WHERE de.relation='IS_A' "
+            "AND LENGTH(de.target)<=6 GROUP BY de.target "
+            "HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC LIMIT 40").fetchall()
+        hub_map = {t: c for t, c in hubs}
+        # IS_A 入度
+        indeg = api_conn.execute(
+            "SELECT de.target, COUNT(*) FROM directed_edges de "
+            "JOIN _n ON de.rowid=_n.rowid WHERE de.relation='IS_A' "
+            "GROUP BY de.target").fetchall()
+        indeg_map = {t: c for t, c in indeg}
+        api_conn.execute("DROP TABLE _n")
         api_conn.close()
-        self._json([{"entity": s, "edges": n, "energy": e} for s, n, e in rows])
+
+        nodes = {}
+        for s, n, e in rows:
+            nodes[s] = {"entity": s, "edges": n, "energy": e,
+                        "in_degree": indeg_map.get(s, 0),
+                        "is_hub": s in hub_map}
+        # 中枢词如果还没当过 source, 也加进星系 (分类节点必须可见)
+        for t, c in hub_map.items():
+            if t not in nodes:
+                nodes[t] = {"entity": t, "edges": 0, "energy": 0.5,
+                            "in_degree": c, "is_hub": True}
+        out = sorted(nodes.values(),
+                     key=lambda x: (x["edges"] + x["in_degree"] * 2,
+                                    x["energy"]), reverse=True)
+        self._json(out[:120])
 
     def _handle_vector(self, word: str):
         """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层)
