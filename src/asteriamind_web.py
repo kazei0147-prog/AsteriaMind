@@ -47,6 +47,7 @@ from AsteriaMind.knowledge_db import KnowledgeDB
 from AsteriaMind.falsification import WebSearchInterface, SearxNGSearch
 from AsteriaMind.conversation_memory import ConversationMemory
 from AsteriaMind.cognitive_interface import CognitiveInterface
+from AsteriaMind.module_registry import REGISTRY
 
 # ── AM 初始化 ──
 import os, json
@@ -80,7 +81,6 @@ _last_rel = ""
 _last_verb = ""
 _last_action = ""
 _last_evidence = None  # ★ v3.6: 最近一次回答的证据链
-_VS_CACHE = None       # ★ v3.6: 向量空间单例 (避免每次请求重载 15万向量)
 _LM_CACHE = None       # ★ v3.7: 统计语言模型单例 (她自己的句式池)
 
 
@@ -872,16 +872,10 @@ loadGalaxy();
         self._json({"nodes": node_list, "edges": edges})
 
     def _handle_vector(self, word: str):
-        """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层)
-
-        返回: {word, neighbors: [{word, sim}], analogies: [...]}
-        """
-        global _VS_CACHE
+        """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层, 走概念层唯一入口)"""
         try:
-            if _VS_CACHE is None:
-                from AsteriaMind.vector_space import VectorSpace
-                _VS_CACHE = VectorSpace()
-            ns = _VS_CACHE.neighbors(word, 10)
+            concept = REGISTRY.get("concept") or ci.concept
+            ns = concept.run(word, 10)
             self._json({
                 "word": word,
                 "neighbors": [{"word": w, "sim": round(s, 3)} for w, s in ns],
@@ -1166,14 +1160,13 @@ loadGalaxy();
                         "clarify", {})
 
             if plan.strategy == "SEARCH":
-                # ★ v3.7: 向量类比推理优先 — 语义近亲 (完整概念) 比碎片共现可靠
-                global _VS_CACHE
+                # ★ v3.7: 向量类比推理优先 — 语义近亲 (走概念层唯一入口)
                 try:
-                    if _VS_CACHE is None:
-                        from AsteriaMind.vector_space import VectorSpace
-                        _VS_CACHE = VectorSpace()
+                    concept = REGISTRY.get("concept")
+                    if concept is None:
+                        concept = ci.concept
                     q = plan.search_query
-                    for w, sim in _VS_CACHE.neighbors(q, top_k=5):
+                    for w, sim in concept.run(q, top_k=5):
                         if sim < 0.95:
                             break  # 相似度饱和噪声多 (小语料), 宁可不用不可乱用
                         # 近亲必须自己认识 (有命名知识可借)
@@ -1249,7 +1242,6 @@ loadGalaxy();
             critic_note = None
             if narrative:
                 try:
-                    from AsteriaMind.module_registry import REGISTRY
                     critic_mod = REGISTRY.get("critic")
                     crit = critic_mod.run(subj) if critic_mod else None
                 except Exception:

@@ -672,6 +672,22 @@ class CognitiveInterface:
         REGISTRY.register(_IntakeModule(self.intake))
         REGISTRY.register(_LanguageModule(None))  # 语言模型延迟加载
 
+        # ★ v3.7: 概念层 — 向量空间的正式归属 (防偏移监控)
+        from AsteriaMind.concept_layer import ConceptLayer
+        self.concept = ConceptLayer(self.cognitive_star_map)
+
+        class _ConceptModule(CognitiveModule):
+            name = "concept"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, word, top_k=10):
+                return self.inner.neighbors(word, top_k)
+            def health(self):
+                return self.inner.health()
+
+        REGISTRY.register(_ConceptModule(self.concept))
+
         # IntentLearner: 意图统计学习 — 从反馈替代正则
         from AsteriaMind.intent_learner import IntentLearner
         self.intent_learner = IntentLearner(self.cognitive_star_map)

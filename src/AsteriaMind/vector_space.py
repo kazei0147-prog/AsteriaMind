@@ -158,6 +158,17 @@ class VectorSpace:
                 break
         return out
 
+    def _pair_sim(self, a: str, b: str) -> float:
+        """两个词的余弦相似度 (锚点监控用)"""
+        self._load()
+        try:
+            ia, ib = self._words.index(a), self._words.index(b)
+            va, vb = self._matrix[ia], self._matrix[ib]
+            return float(np.dot(va, vb) /
+                         (np.linalg.norm(va) * np.linalg.norm(vb) + 1e-9))
+        except ValueError:
+            return -1.0
+
     def analogies(self, a, b, c, top_k=5):
         """类比推理: a 之于 b 就像 c 之于 ?  (b - a + c)"""
         self._load()
