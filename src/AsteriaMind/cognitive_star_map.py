@@ -87,11 +87,76 @@ def _incr_cooccur(cur, a: str, b: str, feedback: str = "confirmed", ts: float = 
         (a, b, conf_boost, ts, conf_boost, ts))
 
 
+# ★ v3.6 质量门 (供 _incr_directed 调用)
+_BAD_PAIRS_TAIL = frozenset(
+    '的 了 是 在 上 中 下 有 和 与 或 被 把 让 对 从 向 为 以 之 也 很 会 能 不 '
+    '就 都 还 又 再 更 但 而 及 若 虽 然 于 其 之 所 似 的'.split()
+)
+# 虚词头: 单字/虚词前缀
+_BAD_PAIRS_HEAD = frozenset(
+    '的 了 是 在 这 那 它 他 她 你 它们 他们 她们 你们'.split()
+)  # "我" 不在 — 自指 (我 CAN 回答问题) 合法
+# ★ v3.6 整个词是虚词 (无论/什么/怎样/因为/然而...) → 直接拒绝
+_BAD_WORDS = frozenset(
+    '无论 什么 怎样 为什么 怎么 如何 因为 所以 如果 而且 然后 但是 可是 然而 '
+    '虽然 要是 那个 这个 这些 那些 某一 另一 哪个 多少 这样 那样 一样 '
+    '这里 那里 何处 任何 所有 只是 已经 现在 一定 真的 大概 也许 可能 或许 '
+    '似乎 看来 其实 不过 当然 因此 于是 此后 其后 由此 自从 直到 经过 '
+    '通过 关于 根据 此外 另外 除了 包括 包含 例如 比如 既不 又不 总是 '
+    '可以 应该 必须 一定 需要 岂可说 是不是 要不 如何是 何以 为何'.split()
+)
+# 虚词短语 (在词内部出现即拒绝)
+_BAD_PHRASES = ('的话', '一样', '似的', '之时', '之后', '而已', '之中', '之后', '之下', '之上', '之间')
+
+
+def _is_valid_entity_pair(source: str, target: str) -> bool:
+    """★ v3.6 命名边质量门: 这对实体值得存吗?
+
+    拒绝:
+      - 主语/宾语本身是虚词 (无论/什么/怎样/因为...)
+      - 包含虚词短语 (的话/一样/似的/之时/之后/而已...)
+      - 主语/宾语以常见功能字开头/结尾
+      - 单字词且长度 1 (避免单字歧义, 蛇/铁 这种可单独接受)
+      - 过长 (句子碎片而非实体)
+    """
+    if not source or not target:
+        return False
+    s, o = source.strip(), target.strip()
+    if not s or not o:
+        return False
+    if len(s) > 12 or len(o) > 12:
+        return False
+    if s == o:
+        return False
+    # 整个词是虚词
+    if s in _BAD_WORDS or o in _BAD_WORDS:
+        return False
+    # 主语/宾语以虚词开头/结尾 (单字词或虚词前缀)
+    if s[:1] in _BAD_PAIRS_HEAD or o[:1] in _BAD_PAIRS_HEAD:
+        return False
+    if s[-1:] in _BAD_PAIRS_TAIL or o[-1:] in _BAD_PAIRS_TAIL:
+        return False
+    # 虚词短语
+    for v in _BAD_PHRASES:
+        if v in s or v in o:
+            return False
+    return True
+
+
 def _incr_directed(cur, source: str, target: str, relation: str = "",
                     feedback: str = "confirmed", ts: float = 0):
-    """有向边: source →[relation]→ target, 保留方向和关系类型"""
+    """有向边: source →[relation]→ target, 保留方向和关系类型
+
+    ★ v3.6: 质量门 — 命名边入口处过滤残片/虚词, 避免星图被垃圾污染
+    """
     if not source or not target or source == target:
         return
+    # 命名关系 (IS_A/CAN/HAS/...) 才需要质量门, co_text 不需要
+    NAMED = {"IS_A", "NOT_IS_A", "CAN", "NOT_CAN", "HAS", "NOT_HAS",
+             "EATS", "NOT_EATS", "LIVES_IN", "ORBITS"}
+    if relation in NAMED:
+        if not _is_valid_entity_pair(source, target):
+            return  # 拒绝垃圾三元组
     conf_boost = 1.0 if feedback == "confirmed" else (0.3 if feedback == "corrected" else 0.5)
     ts = ts or time.time()
     cur.execute(
