@@ -258,6 +258,7 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 <div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
 <div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
 <div class="card"><h3>🌫️ 熵云 (知识模糊区 — 越虚越不确定)</h3><div id="entropy"></div></div>
+<div class="card"><h3>🕰️ 知识生长时间线 (她怎么长起来的)</h3><div id="timeline"></div></div>
 <div class="card"><h3>🔗 最近回答的证据链 (她凭什么这么说)</h3><div id="evidence"></div></div>
 <script>
 async function load(){
@@ -285,6 +286,11 @@ async function load(){
       return '<span class="tag" style="color:rgb('+red+',80,80);filter:blur('+blur+'px)">'
         +x.entity+' H'+x.entropy+'</span>';
     }).join('') : '<span style="color:#3fb950">✅ 无高熵实体 — 知识清晰</span>';
+    document.getElementById('timeline').innerHTML = (d.timeline||[]).length ? d.timeline.map(x=>
+      '<div style="margin:2px 0;font-size:12px"><span style="color:#8b949e;display:inline-block;width:90px">'+x.time+'</span>'
+      +'<span style="color:#58a6ff">'+x.subject+'</span> <span style="color:#d29922">['+x.relation+']</span> '
+      +'<span>'+x.target+'</span> <span style="color:#8b949e">('+x.feedback+')</span></div>').join('')
+      : '<span style="color:#8b949e">暂无记录</span>';
   }catch(e){ document.getElementById('stats').innerHTML='<span style="color:#f85149">加载失败: '+e+'</span>'; }
 }
 async function loadEvidence(){
@@ -484,12 +490,49 @@ loadEvidence(); setInterval(loadEvidence, 5000);
         total_edges = conn.execute(
             "SELECT COUNT(*) FROM directed_edges").fetchone()[0]
 
-        # ★ v3.6: 熵云 — 高熵实体 (知识模糊区), 复用 CriticModule
+        # ★ v3.6: 熵云 — 高熵实体 (知识模糊区)
+        # 直接用 api_conn 计算, 不碰 ci.critic (它锁共享连接, 会死锁!)
         entropy_cloud = []
-        if hasattr(ci, 'critic') and ci.critic:
-            ent = ci.critic.scan_uncertain(top_k=12)
-            entropy_cloud = [{"entity": e["entity"], "entropy": round(e["entropy"], 2)}
-                             for e in ent]
+        import math
+        entities = api_conn.execute(
+            "SELECT DISTINCT source FROM directed_edges "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') LIMIT 500").fetchall()
+        for (e,) in entities:
+            rels = api_conn.execute(
+                "SELECT relation, COUNT(*) FROM directed_edges "
+                "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+                "GROUP BY relation", (e,)).fetchall()
+            if not rels:
+                continue
+            total = sum(n for _, n in rels)
+            if total <= 1:
+                continue
+            h = 0.0
+            for _, n in rels:
+                p = n / total
+                h -= p * math.log(p) if p > 0 else 0
+            h_norm = h / math.log(6)
+            if h_norm > 0.8:  # 熵阈值
+                entropy_cloud.append({"entity": e, "entropy": round(h_norm, 2)})
+        entropy_cloud.sort(key=lambda x: -x["entropy"])
+        entropy_cloud = entropy_cloud[:12]
+
+        # ★ v3.6: 时间演化 (②) — 知识怎么长出来的, 最近 30 条痕迹
+        from AsteriaMind.cognitive_star_map import _is_valid_entity_pair
+        timeline = []
+        for subj, pred, obj, fb, ts in api_conn.execute(
+            "SELECT subj, pred, obj, feedback, timestamp FROM cognitive_traces "
+            "ORDER BY timestamp DESC LIMIT 60").fetchall():
+            # 质量门过滤历史残片 (部分 IS_A 依赖于 这种)
+            if not _is_valid_entity_pair(subj, obj):
+                continue
+            timeline.append({
+                "time": time.strftime('%m-%d %H:%M', time.localtime(ts)) if ts else "?",
+                "subject": subj, "relation": pred, "target": obj,
+                "feedback": fb,
+            })
+            if len(timeline) >= 25:
+                break
         api_conn.close()
 
         self._json({
@@ -499,6 +542,7 @@ loadEvidence(); setInterval(loadEvidence, 5000);
                       for s, r, t in fresh],
             "relation_dist": [{"relation": r, "count": n} for r, n in rel_dist],
             "entropy_cloud": entropy_cloud,
+            "timeline": timeline,
             "stats": {
                 "total_edges": total_edges,
                 "named_edges": named_edges,
