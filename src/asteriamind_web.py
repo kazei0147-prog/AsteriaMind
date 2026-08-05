@@ -252,7 +252,6 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 <div class="card"><div id="stats"></div></div>
 <div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
 <div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
-<div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
 <div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
 <script>
 async function load(){
@@ -264,8 +263,7 @@ async function load(){
       '<span class="stat">总边 <b>'+s.total_edges.toLocaleString()+'</b></span>'+
       '<span class="stat">命名边 <b>'+s.named_edges+'</b></span>'+
       '<span class="stat">冷边 <b class="'+(s.cold_count>0?'cold':'')+'">'+s.cold_count+'</b></span>';
-    const colors = ['#d29922','#e3b341','#58a6ff','#3fb950','#a371f7','#f0883e','#39c5cf','#f85149'];
-    let maxE = Math.max(1, ...d.hot.map(x=>x.energy));
+    // maxE 仅供后续扩展用, 当前没有 hot 数据所以不需要
     document.getElementById('cold').innerHTML = d.cold.length ? d.cold.map(x=>
       '<span class="tag cold">'+x.source+' ['+x.relation+'] '+x.target+' E'+x.energy+'</span>').join('')
       : '<span style="color:#3fb950">✅ 无冷边 — 知识能量健康</span>';
