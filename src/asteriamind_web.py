@@ -79,6 +79,7 @@ _last_subj = ""
 _last_rel = ""
 _last_verb = ""
 _last_action = ""
+_last_evidence = None  # ★ v3.6: 最近一次回答的证据链
 
 # 从 DB 恢复已有知识
 for r in db.query():
@@ -208,6 +209,9 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._handle_health()
         elif self.path == "/api/graph":
             self._handle_graph()
+        elif self.path == "/api/evidence":
+            self._json(_last_evidence if _last_evidence else
+                       {"question": "暂无回答记录", "edges": []})
         else:
             self.send_error(404)
 
@@ -253,6 +257,7 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 <div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
 <div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
 <div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
+<div class="card"><h3>🔗 最近回答的证据链 (她凭什么这么说)</h3><div id="evidence"></div></div>
 <script>
 async function load(){
   try{
@@ -275,7 +280,27 @@ async function load(){
       '<span class="tag">'+x.relation+' ×'+x.count+'</span>').join('');
   }catch(e){ document.getElementById('stats').innerHTML='<span style="color:#f85149">加载失败: '+e+'</span>'; }
 }
+async function loadEvidence(){
+  try{
+    const r = await fetch('/api/evidence');
+    const d = await r.json();
+    if(!d.edges || !d.edges.length){ document.getElementById('evidence').innerHTML='<span style="color:#8b949e">还没回答过问题 — 去聊两句, 这里会显示她走了哪些边</span>'; return; }
+    let html = '<div style="margin-bottom:8px">问: <b>'+d.question+'</b> &nbsp; 策略: '+d.strategy+' &nbsp; 意图: '+d.intent;
+    if(d.uncertain) html += ' &nbsp; <span class="cold">⚠ 不确定 ('+d.uncertain.entropy.toFixed(2)+')</span>';
+    html += '</div>';
+    html += d.edges.map((e,i)=>{
+      const w = 30 + Math.min(60, e.salience*40);
+      return '<div style="margin:3px 0;padding:6px 10px;background:#21262d;border-radius:6px;border-left:3px solid '+(d.uncertain?'#f85149':'#3fb950')+';width:'+w+'%">'
+        + '<span style="color:#58a6ff">'+d.subject+'</span> '
+        + '<span style="color:#d29922">['+e.relation+']</span> '
+        + '<span style="color:#e6edf3">'+e.target+'</span> '
+        + '<span style="color:#8b949e;font-size:11px">E'+e.energy+'</span></div>';
+    }).join('');
+    document.getElementById('evidence').innerHTML = html;
+  }catch(e){ document.getElementById('evidence').innerHTML='<span style="color:#f85149">证据链加载失败</span>'; }
+}
 load(); setInterval(load, 5000);
+loadEvidence(); setInterval(loadEvidence, 5000);
 </script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -728,9 +753,11 @@ load(); setInterval(load, 5000);
                     "triggers": [e["relation"]], "degree": 0} for e in edges[:8]]
             narrative = lg._compose_narrative(subj, act, [], intent=intent)
             # ★ v3.6: 批判者 — 熵高时诚实标注不确定性 ★
+            critic_note = None
             if narrative and hasattr(ci, 'critic'):
                 crit = ci.critic.check(subj)
                 if crit:
+                    critic_note = crit
                     narrative = crit["preface"] + narrative
             if narrative:
                 _last_strategy = plan.strategy
@@ -738,6 +765,22 @@ load(); setInterval(load, 5000);
                 _last_intent = intent
                 for e in edges[:3]:
                     ci.mother.star_map.restore_energy(subj, e["target"], 0.03)
+                # ★ v3.6: 证据链 — 记录回答走了哪些边 (供 /api/evidence) ★
+                global _last_evidence
+                _last_evidence = {
+                    "question": text,
+                    "subject": subj,
+                    "strategy": plan.strategy,
+                    "intent": intent,
+                    "uncertain": critic_note,
+                    "edges": [{
+                        "relation": e["relation"],
+                        "target": e["target"],
+                        "energy": e.get("energy", 0),
+                        "salience": e.get("salience", 0),
+                    } for e in edges[:6]],
+                    "ts": time.time(),
+                }
                 # ★ v3.6: 自学习 — 每个成功回答更新自我认知 ★
                 ci.mother.star_map.store("我", "CAN", "回答问题",
                     "confirmed", f"成功回答: {subj}({plan.strategy})")
