@@ -204,6 +204,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._handle_reflect()
         elif self.path == "/api/health":
             self._handle_health()
+        elif self.path == "/api/graph":
+            self._handle_graph()
         else:
             self.send_error(404)
 
@@ -355,6 +357,63 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         health["meta_cognition_weights"] = ci.mother.meta_cognition.get_all_weights()
         health["star_map_traces"] = ci.cognitive_star_map.count()
         self._json(health)
+
+    def _handle_graph(self):
+        """★ v3.6: 知识能量视图 (③) — 星图热力数据
+
+        返回:
+          hot:   高能量命名实体 (知识活跃区)
+          cold:  低能量/衰减边 (知识冬眠区)
+          fresh: 最近新增的命名边 (成长区)
+          stats: 星图健康指标
+        """
+        star = ci.mother.star_map
+        conn = star.conn
+        now = time.time()
+
+        # 活跃实体: 命名边多 + 能量高
+        hot = conn.execute(
+            "SELECT source, COUNT(*) as n, ROUND(AVG(COALESCE(energy,1.0)),2) as e "
+            "FROM directed_edges "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+            "GROUP BY source ORDER BY n*e DESC LIMIT 15").fetchall()
+
+        # 冷边: 低能量命名边 (可能在学习中遗忘)
+        cold = conn.execute(
+            "SELECT source, relation, target, ROUND(COALESCE(energy,0),2) as e "
+            "FROM directed_edges "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') "
+            "AND COALESCE(energy,1.0) < 0.4 "
+            "ORDER BY e ASC LIMIT 10").fetchall()
+
+        # 新鲜边: 最近 1 天新增
+        fresh = conn.execute(
+            "SELECT source, relation, target FROM directed_edges "
+            "WHERE last_update > ? AND relation IN ('IS_A','CAN','NOT_CAN','HAS') "
+            "ORDER BY last_update DESC LIMIT 10", (now - 86400,)).fetchall()
+
+        # 关系分布 + 健康
+        rel_dist = conn.execute(
+            "SELECT relation, COUNT(*) FROM directed_edges "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "GROUP BY relation").fetchall()
+        total_edges = conn.execute(
+            "SELECT COUNT(*) FROM directed_edges").fetchone()[0]
+        named_edges = sum(n for _, n in rel_dist)
+
+        self._json({
+            "hot": [{"entity": s, "edges": n, "energy": e} for s, n, e in hot],
+            "cold": [{"source": s, "relation": r, "target": t, "energy": e}
+                     for s, r, t, e in cold],
+            "fresh": [{"source": s, "relation": r, "target": t}
+                      for s, r, t in fresh],
+            "relation_dist": [{"relation": r, "count": n} for r, n in rel_dist],
+            "stats": {
+                "total_edges": total_edges,
+                "named_edges": named_edges,
+                "cold_count": len(cold),
+            },
+        })
 
     def _extract_topic(self, text: str) -> str:
         """从一句话提取核心话题词"""

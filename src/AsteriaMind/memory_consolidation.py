@@ -64,27 +64,38 @@ class MemoryConsolidation:
         return result
 
     def _resolve_contradictions(self) -> int:
-        """每个矛盾: 保留能量最高的边, 其余砍半"""
+        """每个矛盾: 保留能量最高的关系, 相反关系砍半
+
+        新结构: c["objects"] = [rel_a, rel_b]  (正反对, 如 [CAN, NOT_CAN])
+        保留能量高的那个, 砍掉相反的
+        """
         resolved = 0
         for c in self.contradictions:
-            subj, pred, objs = c["subject"], c["predicate"], list(c["objects"])
-            if len(objs) < 2: continue
-            # 查每条边的能量
-            best = None
-            best_energy = 0
-            for obj in objs:
+            subj, pred_pair, rels = c["subject"], c["predicate"], list(c["objects"])
+            obj = c.get("obj")  # 正反对共用同一个 obj (新检测逻辑按 subj+obj 分组)
+            if obj is None:
+                # 兼容: 旧结构按 pred 分组 — 直接跳过 (已由新检测替代)
+                continue
+            if len(rels) < 2:
+                continue
+            # 查正反两条边的能量
+            best_rel = None
+            best_energy = -1
+            for rel in rels:
                 e = self.star_map.conn.execute(
                     "SELECT energy FROM directed_edges WHERE source=? AND relation=? AND target=?",
-                    (subj, pred, obj)).fetchone()
+                    (subj, rel, obj)).fetchone()
                 energy = e[0] if e else 0
                 if energy > best_energy:
-                    best_energy = energy; best = obj
+                    best_energy = energy
+                    best_rel = rel
             # 胜者保留, 败者砍半
-            for obj in objs:
-                if obj != best:
+            for rel in rels:
+                if rel != best_rel:
                     self.star_map.conn.execute(
-                        "UPDATE directed_edges SET energy=energy*0.5 WHERE source=? AND relation=? AND target=?",
-                        (subj, pred, obj))
+                        "UPDATE directed_edges SET energy=energy*0.5 "
+                        "WHERE source=? AND relation=? AND target=?",
+                        (subj, rel, obj))
                     resolved += 1
         if resolved:
             self.star_map.conn.commit()
@@ -119,37 +130,53 @@ class MemoryConsolidation:
 
     def _detect_contradictions(self) -> list[dict]:
         """
-        检测矛盾: 同一个 subj 被确认属于两个不同的 obj。
+        检测矛盾: 同一 subj+obj 有正反对立的关系。
 
         例如:
-          蝙蝠 IS_A 哺乳动物 (confirmed)
-          蝙蝠 IS_A 鸟 (confirmed)
-          → 标记为矛盾, 等待用户澄清
+          企鹅 CAN 飞行 (confirmed)
+          企鹅 NOT_CAN 飞行 (confirmed)
+          → 真矛盾, 调和
+
+        非矛盾 (多重继承, 合法, 不调和):
+          企鹅 IS_A 水鸟  +  企鹅 IS_A 鸟类  → 上下位, 都成立
+          企鹅 HAS 羽毛    +  企鹅 HAS 翅膀  → 多属性, 都成立
         """
         if not self.star_map or not hasattr(self.star_map, 'conn'):
             return []
 
         conn = self.star_map.conn
         contradictions = []
-        subject_groups = defaultdict(lambda: defaultdict(set))
-
+        # 正反对: CAN↔NOT_CAN, IS_A↔NOT_IS_A, HAS↔NOT_HAS...
+        OPPOSITES = {
+            "CAN": "NOT_CAN", "NOT_CAN": "CAN",
+            "IS_A": "NOT_IS_A", "NOT_IS_A": "IS_A",
+            "HAS": "NOT_HAS", "NOT_HAS": "HAS",
+            "EATS": "NOT_EATS", "NOT_EATS": "EATS",
+        }
+        seen = set()
         for row in conn.execute(
-            "SELECT subj, pred, obj, feedback FROM cognitive_traces "
-            "WHERE feedback='confirmed'"
+            "SELECT DISTINCT source, relation, target FROM directed_edges "
+            "WHERE relation IN ('CAN','NOT_CAN','IS_A','NOT_IS_A','HAS','NOT_HAS','EATS','NOT_EATS')"
         ):
-            key = f"{row[1]}"  # predicate only
-            subject_groups[row[0]][key].add(row[2])
-
-        for subj, pred_groups in subject_groups.items():
-            for pred, objs in pred_groups.items():
-                if len(objs) > 1:
+            subj, rel, obj = row
+            opp = OPPOSITES.get(rel)
+            if not opp:
+                continue
+            # 检查对立边是否存在
+            has_opp = conn.execute(
+                "SELECT 1 FROM directed_edges WHERE source=? AND relation=? AND target=? LIMIT 1",
+                (subj, opp, obj)).fetchone()
+            if has_opp:
+                key = (subj, obj)
+                if key not in seen:
+                    seen.add(key)
                     contradictions.append({
                         "subject": subj,
-                        "predicate": pred,
-                        "objects": list(objs),
-                        "severity": "warning"
+                        "predicate": f"{rel}/{opp}",
+                        "objects": [rel, opp],
+                        "obj": obj,
+                        "severity": "conflict"
                     })
-
         return contradictions
 
     def _decay_cold_edges(self) -> int:
