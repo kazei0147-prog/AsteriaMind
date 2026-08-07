@@ -6,6 +6,7 @@ v3: 统计共近代替代字符哈希。
 认知 + 语言痕迹共存于同一空间，同时检索。
 """
 import time, math, sqlite3, struct, re, os
+import threading
 from typing import Optional
 
 
@@ -323,6 +324,11 @@ class CognitiveStarMap:
         # ★ v3.7: timeout=30 — 后台线程写锁时, 回答请求等锁而不是 5s 放弃
         self.conn = sqlite3.connect(db_path, check_same_thread=False,
                                     timeout=30)
+        # ★ v3.7: 写连接 + 写锁 — 后台大写入 (spread_write) 走独立连接
+        #   避免共享连接被 RSS/离线学习写锁卡住回答请求 (database is locked)
+        self._write_lock = threading.Lock()
+        self._writer = sqlite3.connect(db_path, check_same_thread=False,
+                                       timeout=30)
         self._vocab_cache = None  # ★ v3.7: 向量词表缓存 (碎片过滤)
         self.co_conn = None
         if co_db and os.path.exists(co_db):
@@ -1090,23 +1096,25 @@ class CognitiveStarMap:
         if len(words) < 2:
             return
 
-        cur = self.conn.cursor()
-        ts = time.time()
-        # 两两共现: 同时出现在同一段文本中的词 → 边权+1
-        # ★ v3.7: 分批 commit — 每 400 次写释放锁 (避免长时间持锁卡回答)
-        writes = 0
-        for i in range(len(words)):
-            for j in range(i + 1, len(words)):
-                a, b = words[i], words[j]
-                if a == b: continue
-                # ★ v3.6: 联想能量 — co_text 边 0.1 起步, 重复才涨 ★
-                _incr_co_text(cur, a, b, ts)
-                _incr_co_text(cur, b, a, ts)
-                writes += 2
-                if writes >= 400:
-                    self.conn.commit()
-                    writes = 0
-        self.conn.commit()
+        # ★ v3.7: 独立写连接 + 写锁 (不卡回答请求的共享读连接)
+        with self._write_lock:
+            cur = self._writer.cursor()
+            ts = time.time()
+            # 两两共现: 同时出现在同一段文本中的词 → 边权+1
+            # 分批 commit — 每 400 次写释放锁 (避免长时间持锁)
+            writes = 0
+            for i in range(len(words)):
+                for j in range(i + 1, len(words)):
+                    a, b = words[i], words[j]
+                    if a == b: continue
+                    # ★ v3.6: 联想能量 — co_text 边 0.1 起步, 重复才涨 ★
+                    _incr_co_text(cur, a, b, ts)
+                    _incr_co_text(cur, b, a, ts)
+                    writes += 2
+                    if writes >= 400:
+                        self._writer.commit()
+                        writes = 0
+            self._writer.commit()
 
     def emergent_reply(self, text: str, subj: str, pred: str, obj: str) -> dict:
         """共现 + 语言统一检索 → 涌现回复"""
