@@ -320,7 +320,9 @@ class CognitiveStarMap:
     """统一星图——共现向量 + 语言涌现 + 能量代谢"""
 
     def __init__(self, db_path: str = "asteriamind.db", co_db: str = ""):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # ★ v3.7: timeout=30 — 后台线程写锁时, 回答请求等锁而不是 5s 放弃
+        self.conn = sqlite3.connect(db_path, check_same_thread=False,
+                                    timeout=30)
         self.co_conn = None
         if co_db and os.path.exists(co_db):
             self.co_conn = sqlite3.connect(co_db, check_same_thread=False)
@@ -1073,6 +1075,8 @@ class CognitiveStarMap:
         cur = self.conn.cursor()
         ts = time.time()
         # 两两共现: 同时出现在同一段文本中的词 → 边权+1
+        # ★ v3.7: 分批 commit — 每 400 次写释放锁 (避免长时间持锁卡回答)
+        writes = 0
         for i in range(len(words)):
             for j in range(i + 1, len(words)):
                 a, b = words[i], words[j]
@@ -1080,6 +1084,10 @@ class CognitiveStarMap:
                 # ★ v3.6: 联想能量 — co_text 边 0.1 起步, 重复才涨 ★
                 _incr_co_text(cur, a, b, ts)
                 _incr_co_text(cur, b, a, ts)
+                writes += 2
+                if writes >= 400:
+                    self.conn.commit()
+                    writes = 0
         self.conn.commit()
 
     def emergent_reply(self, text: str, subj: str, pred: str, obj: str) -> dict:
