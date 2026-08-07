@@ -721,6 +721,14 @@ class CognitiveInterface:
             concept=self.concept,  # ★ v3.7: 概念层缺口想法源
         )
 
+        # ★ v3.7: 自发发言器 — 想说什么就说什么 (输出=f(内部状态))
+        from AsteriaMind.spontaneous_speaker import SpontaneousSpeaker
+        self.speaker = SpontaneousSpeaker(
+            star_map=self.cognitive_star_map,
+            critic=self.critic,
+            concept=self.concept,
+        )
+
         # ── v3.3: 反映射闭环 ──
         from AsteriaMind.reflection import SessionReflector
         self._reflectors: dict[str, SessionReflector] = {}  # session_id → reflector

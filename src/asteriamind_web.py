@@ -185,6 +185,21 @@ async function send() {
     input.disabled = false;
     input.focus();
 }
+
+// ★ v3.7: 自发发言轮询 — 她"想说什么就说什么", 不等你问
+async function pollUtterances() {
+    try {
+        const res = await fetch('/api/utterances');
+        const data = await res.json();
+        (data.utterances || []).forEach(u => {
+            const meta = u.kind === 'learned' ? '💭 AM · 分享' :
+                         u.kind === 'conflict' ? '💭 AM · 质疑' :
+                         u.kind === 'fuzzy' ? '💭 AM · 求知' : '💭 AM · 自语';
+            addMsg(u.text, 'am', meta);
+        });
+    } catch(e) { /* 静默, 下轮再试 */ }
+}
+setInterval(pollUtterances, 10000);
 </script>
 </body>
 </html>"""
@@ -231,6 +246,13 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             })
         elif self.path == "/api/reflect":
             self._handle_reflect()
+        elif self.path == "/api/utterances":
+            # ★ v3.7: 自发发言 — 前端轮询拉取她"想说的话"
+            try:
+                uts = ci.speaker.drain() if hasattr(ci, 'speaker') else []
+                self._json({"utterances": uts})
+            except Exception as e:
+                self._json({"utterances": [], "error": str(e)[:80]})
         elif self.path == "/api/health":
             self._handle_health()
         elif self.path == "/api/graph":
@@ -1829,10 +1851,34 @@ if __name__ == "__main__":
                               f"winners={result['winners']} "
                               f"learned={result['learned']} "
                               f"skipped={result['skipped']}")
+
+                    # ★ v3.7: 学完有想法 → 自发发言 (不等用户输入)
+                    try:
+                        if hasattr(ci, 'speaker'):
+                            n = ci.speaker.tick()
+                            if n > 0:
+                                print(f"\n  💭 AM 自发发言: 说了 {n} 条")
+                    except Exception as se:
+                        print(f"  ⚠️ speaker error: {se}")
             except Exception as e:
                 print(f"\n  ⚠️ Offline learning error: {e}")
 
     threading.Thread(target=_offline_learn_loop, daemon=True).start()
+
+    # ── ★ v3.7: 自发发言循环 — 想说什么就说什么 ──
+    # 独立线程, 不依赖 offline learning 是否跑成功
+    def _speaker_loop():
+        while True:
+            try:
+                if hasattr(ci, 'speaker'):
+                    n = ci.speaker.tick()
+                    if n > 0:
+                        print(f"\n  💭 AM 自发发言: {n} 条")
+            except Exception as e:
+                print(f"  ⚠️ speaker loop error: {e}")
+            time.sleep(45)
+
+    threading.Thread(target=_speaker_loop, daemon=True).start()
 
     # ── ★ v3.7: RSS 送饭循环 — 每 6 小时自动喂语料 ──
     def _rss_loop():
