@@ -134,9 +134,16 @@ class VectorSpace:
             return
         t0 = time.time()
         rows = self.conn.execute("SELECT word, vector FROM word_vectors").fetchall()
+        # ★ v3.7: 过滤纯英文 (防止 GEB 残留英文术语污染联想/缺口想法)
+        #   至少含一个中文字符
+        rows = [(w, v) for w, v in rows
+                if any('\u4e00' <= ch <= '\u9fff' for ch in w)]
         self._words = [w for w, _ in rows]
-        self._matrix = np.vstack([np.frombuffer(v, dtype=np.float32)
-                                  for _, v in rows])
+        if rows:
+            self._matrix = np.vstack([np.frombuffer(v, dtype=np.float32)
+                                      for _, v in rows])
+        else:
+            self._matrix = np.zeros((0, 0), dtype=np.float32)
         print(f"向量载入: {len(self._words)} 词, {time.time()-t0:.1f}s")
 
     def neighbors(self, word: str, top_k: int = 10) -> list:

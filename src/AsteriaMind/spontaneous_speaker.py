@@ -25,6 +25,41 @@ _MIN_INTERVAL = 90      # 两次自发发言最短间隔 (秒) — 不喋喋不�
 _MAX_PENDING = 4        # 队列上限 — 不刷屏
 _FRESH_WINDOW = 1800    # 只对 30 分钟内的新知识有分享欲
 
+# ★ v3.7: learned 质量门 — 拒绝残片/虚词 trace
+# "因此饲养野鸟"、"世界上很多地方都"、"猴子是哺乳动物还" 这种不该上桌
+_BAD_TRACE = frozenset(
+    "的 了 是 在 上 中 下 有 和 与 或 被 把 让 对 从 向 为 之 也 很 会 能 不 就 都 还 又 再 "
+    "因此 所以 因为 但是 然而 虽说 如果 虽然 不仅 而且 或者 另外 此外 除了 包括 "
+    "世界上 地方都 都会 都能 可能 "
+    "什么 怎么 为什么 哪 多少 怎样 几个 "
+    "一个 一种 一类 一些 一只 一群 一项 一点点 一些些".split())
+_TRACE_MIN = 1   # "我" 等单字主语允许
+_TRACE_MAX = 7   # 真知识宾语可能 6-7 字 (如"一类脊椎动物")
+
+
+def _is_valid_trace_pair(s: str, o: str) -> bool:
+    """★ 质量门: trace 的 subj/obj 必须是真实体, 不是残片"""
+    if not s or not o:
+        return False
+    if len(s) < _TRACE_MIN or len(s) > _TRACE_MAX:
+        return False
+    if len(o) < _TRACE_MIN or len(o) > _TRACE_MAX:
+        return False
+    if s == o:
+        return False
+    if not any('\u4e00' <= ch <= '\u9fff' for ch in s):
+        return False
+    if not any('\u4e00' <= ch <= '\u9fff' for ch in o):
+        return False
+    if s in _BAD_TRACE or o in _BAD_TRACE:
+        return False
+    for bad in ("世界上", "地方都", "都会", "都能", "都可能",
+                "不仅", "而且", "因此", "所以", "但是", "然而",
+                "而且还", "但是不", "还会", "但是还"):
+        if bad in s or bad in o:
+            return False
+    return True
+
 
 class SpontaneousSpeaker:
     def __init__(self, star_map, critic=None, concept=None):
@@ -63,6 +98,9 @@ class SpontaneousSpeaker:
                 if not ts or now - ts > _FRESH_WINDOW:
                     continue
                 if not s or not o or len(s) < 1 or len(o) < 1:
+                    continue
+                # ★ v3.7: 质量门 — 残片/虚词/句子截断不上桌
+                if not _is_valid_trace_pair(s, o):
                     continue
                 thoughts.append({
                     "priority": 8, "kind": "learned",

@@ -19,6 +19,11 @@ from collections import Counter
 
 _DB = "asteriamind.db"
 
+
+def _has_chinese(s: str) -> bool:
+    """★ v3.7: 至少含一个中文字符 — 防止英文/拼音混入骨架"""
+    return any('\u4e00' <= ch <= '\u9fff' for ch in s)
+
 # 关系词 → 星图关系 (用于骨架分类)
 _REL_WORDS = {
     "IS_A":     ["是", "属于", "作为", "被视为"],
@@ -55,18 +60,20 @@ class LanguageModel:
         self._pool = None  # {relation: [(skeleton, count)]}
 
     def _load_vocab(self) -> set:
-        """词表: 向量词表 + 命名实体 (实体识别用)"""
+        """词表: 向量词表 + 命名实体 (实体识别用)
+        ★ v3.7: 过滤纯英文/英文为主的词 — GEB 残留英文术语污染骨架池
+        """
         v = set()
         try:
             for (w,) in self.conn.execute(
                     "SELECT word FROM word_vectors").fetchall():
-                if len(w) >= 2:
+                if len(w) >= 2 and _has_chinese(w):
                     v.add(w)
         except Exception:
             pass
         for (w,) in self.conn.execute(
                 "SELECT DISTINCT source FROM directed_edges").fetchall():
-            if len(w) >= 2:
+            if len(w) >= 2 and _has_chinese(w):
                 v.add(w)
         return v
 
@@ -112,12 +119,15 @@ class LanguageModel:
         return self._pool
 
     def _find_entity(self, text: str) -> str:
-        """在文本里找最长词表匹配 (实体识别)"""
+        """在文本里找最长词表匹配 (实体识别)
+        ★ v3.7: 防御性二次校验 — entity 必须含中文, 防止英文混入骨架
+        """
         best = ""
         for w in range(min(8, len(text)), 1, -1):
             for i in range(len(text) - w + 1):
                 kw = text[i:i + w]
-                if kw in self.vocab and len(kw) > len(best):
+                if (kw in self.vocab and len(kw) > len(best)
+                        and _has_chinese(kw)):
                     best = kw
             if best:
                 break
