@@ -1189,8 +1189,17 @@ loadGalaxy();
                                  "borrowed": best})
                 except Exception as e:
                     print(f"向量类比失败: {e}")
-                # ★ v3.6: 软证据 — 其次问联想 (co_text 共现, 碎片多时质量一般)
-                soft = ci.mother.star_map.soft_evidence(plan.search_query, top_k=5)
+                # ★ v3.6: 软证据 — 其次问联想 (co_text 共现)
+                soft = ci.mother.star_map.soft_evidence(plan.search_query, top_k=8)
+                # ★ v3.7: 语义验证 — related 必须在查询词的向量近邻里
+                #   co_text 共现 ≠ 语义相关 (语文课程~微积分 同文档共现)
+                if soft:
+                    try:
+                        semantic = {w for w, _ in
+                                    concept.run(plan.search_query, top_k=30)}
+                        soft = [x for x in soft if x["related"] in semantic][:5]
+                    except Exception:
+                        pass
                 if soft:
                     relates = "、".join(f"「{s['related']}」" for s in soft[:4])
                     reply = (f"我还不太确定「{plan.search_query[:8]}」具体是什么，"

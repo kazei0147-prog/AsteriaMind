@@ -323,6 +323,7 @@ class CognitiveStarMap:
         # ★ v3.7: timeout=30 — 后台线程写锁时, 回答请求等锁而不是 5s 放弃
         self.conn = sqlite3.connect(db_path, check_same_thread=False,
                                     timeout=30)
+        self._vocab_cache = None  # ★ v3.7: 向量词表缓存 (碎片过滤)
         self.co_conn = None
         if co_db and os.path.exists(co_db):
             self.co_conn = sqlite3.connect(co_db, check_same_thread=False)
@@ -1003,6 +1004,19 @@ class CognitiveStarMap:
         '就 都 还 又 再 更 最 太 很 都 并 但 而 及 若 虽 然 于 其 之 所 也 呢 吗 吧 啊'.split()
     )
 
+    def _word_vocab(self) -> set:
+        """★ v3.7: 向量词表 (jieba 分词结果) — 真实词验证, 挡滑动窗口碎片"""
+        if self._vocab_cache is None:
+            self._vocab_cache = set()
+            try:
+                for (w,) in self.conn.execute(
+                        "SELECT word FROM word_vectors").fetchall():
+                    if len(w) >= 2:
+                        self._vocab_cache.add(w)
+            except Exception:
+                pass
+        return self._vocab_cache
+
     def soft_evidence(self, word: str, top_k: int = 5) -> list[dict]:
         """★ v3.6: 软证据 — co_text 联想作为回答证据源
 
@@ -1025,6 +1039,7 @@ class CognitiveStarMap:
         query_words = list(dict.fromkeys(query_words))  # 去重保序
 
         candidates = []
+        vocab = self._word_vocab()  # ★ v3.7: 词表验证 (挡滑动窗口碎片)
         for w in query_words[:3]:
             rows = self.conn.execute(
                 "SELECT target, energy FROM directed_edges "
@@ -1035,6 +1050,9 @@ class CognitiveStarMap:
                 if t[-1] in self._FRAG_TAILS:
                     continue
                 if len(t) >= 4 and any(x in t for x in ('的', '是', '了')):
+                    continue
+                # ★ v3.7: 向量词表验证 — 碎片 (种文/像大/成各种) 不在词表
+                if vocab and t not in vocab:
                     continue
                 candidates.append({"word": w, "related": t, "energy": round(e, 2)})
         # 去重 (同相关词保留最高能量)

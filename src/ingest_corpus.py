@@ -110,22 +110,24 @@ def main():
         "('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN')").fetchone()[0]
 
     print("═══ 喂料点火 ═══")
-    for f in sorted(os.listdir(_CORPUS)):
-        if not f.endswith(".txt"):
-            continue
-        path = os.path.join(_CORPUS, f)
-        done = conn.execute(
-            "SELECT 1 FROM ingested_files WHERE filename=?", (f,)).fetchone()
-        if done:
-            print(f"⏭  {f}: 已处理过, 跳过")
-            continue
-        text = open(path, encoding="utf-8", errors="ignore").read()
-        n_lt = step1_language_traces(conn, f, text)
-        n_co = step2_spread_write(star_map, text)
-        conn.execute("INSERT INTO ingested_files VALUES (?,?,?)",
-                     (f, time.time(), len(text)))
-        conn.commit()
-        print(f"✓ {f}: {len(text):,}字 → 语言史+{n_lt} 联想+{n_co:,}")
+    for root, _dirs, files in os.walk(_CORPUS):
+        for f in sorted(files):
+            if not f.endswith(".txt"):
+                continue
+            path = os.path.join(root, f)
+            rel = os.path.relpath(path, _CORPUS)  # 子目录用相对路径去重
+            done = conn.execute(
+                "SELECT 1 FROM ingested_files WHERE filename=?", (rel,)).fetchone()
+            if done:
+                print(f"⏭  {rel}: 已处理过, 跳过")
+                continue
+            text = open(path, encoding="utf-8", errors="ignore").read()
+            n_lt = step1_language_traces(conn, rel, text)
+            n_co = step2_spread_write(star_map, text)
+            conn.execute("INSERT INTO ingested_files VALUES (?,?,?)",
+                         (rel, time.time(), len(text)))
+            conn.commit()
+            print(f"✓ {rel}: {len(text):,}字 → 语言史+{n_lt} 联想+{n_co:,}")
 
     print("\n── 向量重训 (全部语料) ──")
     vr = step3_retrain_vectors()
