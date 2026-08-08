@@ -1277,6 +1277,25 @@ loadGalaxy();
                 return (f"🤔 关于「{subj}」，我知道的还不多。你能教教我吗？",
                         "unknown", {})
 
+            # ★ v3.8: 推理链 — IS_A 意图时补传递推理 (企鹅→鸟类→脊椎动物)
+            #   已知的边不再重复, 只补两跳推理 (一跳 IS_A 已在 edges)
+            if hasattr(ci, 'reasoning') and "IS_A" in (intent or ""):
+                try:
+                    known = {e["target"] for e in edges}
+                    for r in ci.reasoning.infer(subj, top_k=3):
+                        if r["hops"] < 2 or r["target"] in known:
+                            continue
+                        edges.append({
+                            "source": subj, "relation": "IS_A",
+                            "target": r["target"],
+                            "salience": r["confidence"],
+                            "energy": r["confidence"],
+                            "inferred": True,
+                            "path": r.get("path", []),
+                        })
+                except Exception:
+                    pass
+
             edges = apply_intent_weight(edges, intent)
             # ★ v3.7: 统计语言生成 — 她自己的句式 (骨架池采样), 模板只兜底
             narrative = _speak_with_own_language(subj, edges)
@@ -1315,6 +1334,8 @@ loadGalaxy();
                         "target": e["target"],
                         "energy": e.get("energy", 0),
                         "salience": e.get("salience", 0),
+                        "inferred": e.get("inferred", False),
+                        "path": e.get("path", []),
                     } for e in edges[:6]],
                     "ts": time.time(),
                 }

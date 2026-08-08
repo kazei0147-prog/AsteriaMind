@@ -729,6 +729,10 @@ class CognitiveInterface:
             concept=self.concept,
         )
 
+        # ★ v3.8: 推理链 — 传递推理 (企鹅→鸟类→脊椎动物)
+        from AsteriaMind.reasoning_chain import ReasoningChain
+        self.reasoning = ReasoningChain(self.cognitive_star_map)
+
         # ── v3.3: 反映射闭环 ──
         from AsteriaMind.reflection import SessionReflector
         self._reflectors: dict[str, SessionReflector] = {}  # session_id → reflector

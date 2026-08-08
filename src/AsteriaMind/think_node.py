@@ -143,6 +143,20 @@ class ThinkNode:
         if named_count >= 2:
             return ActionPlan("DIRECT", subject, relation_hints=[rel_hint])
 
+        # ★ v3.8: 只有 1 条边时, 先试推理链 — "三角龙" 只有 IS_A 恐龙
+        #   但 恐龙 IS_A 爬行动物 → 能推两跳 → 值得 DIRECT 回答
+        if named_count == 1 and rel_hint == "IS_A":
+            try:
+                from AsteriaMind.reasoning_chain import ReasoningChain
+                if not hasattr(self, "_rc") or self._rc is None:
+                    self._rc = ReasoningChain(self.star_map)
+                chain = self._rc.infer(subject, top_k=2)
+                if any(r["hops"] >= 2 for r in chain):
+                    return ActionPlan("DIRECT", subject,
+                                      relation_hints=[rel_hint])
+            except Exception:
+                pass
+
         # ── 3.5 类群概念检查: X 被多个实体 IS_A 指向 → 问"X是什么"答 X 本身 ──
         #    "甲壳动物是什么" → 甲壳动物被螃蟹/龙虾/虾归类 → SEARCH 查定义
         #    而不是反推成成员 (答虾) — REVERSE 只适合属性词 (羽毛→鸟类)
