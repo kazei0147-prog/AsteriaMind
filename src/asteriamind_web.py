@@ -8,7 +8,14 @@ AsteriaMind Web Chat — 浏览器交互窗口 (v3.2)
 
 不需要 Flask/Django——纯 Python 内置 http.server。
 """
-import http.server, json, re, time, os, sys
+import sys
+# ★ Windows GBK 陷阱: emoji (🧠) 在 GBK 下编码崩 → 强制 UTF-8
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+import http.server, json, re, time, os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from collections import deque
@@ -71,6 +78,10 @@ if SEARXNG_URL:
 else:
     web_search = WebSearchInterface()
 ci = CognitiveInterface(kg, db, web_search)
+
+# ★ v3.8: 对话语料回流器 — 用户的话 = 她该学的说话方式
+from AsteriaMind.conversation_replay import ConversationReplay
+_REPLAY = ConversationReplay("asteriamind.db")
 
 # ★ 跨请求状态 (HTTP 每请求新建 Handler, 实例状态会丢, 必须用全局)
 _last_strategy = ""
@@ -628,6 +639,11 @@ loadGalaxy();
             # ── 短期记忆: 最近 4 轮对话 ★ ──
             topic = self._extract_topic(text)
             CONV_MEMORY.add(sid, "user", text, topic)
+            # ★ v3.8: 对话语料实时回流 — 用户的话是她该学的说话方式
+            try:
+                _REPLAY.ingest(text)
+            except Exception:
+                pass
             recent = CONV_MEMORY.get_recent(sid, n=4)
             short_mem = "\n".join(f"[{r['role']}]: {r['content'][:120]}" for r in recent)
             # 长记忆上下文
@@ -1784,6 +1800,13 @@ loadGalaxy();
 
 if __name__ == "__main__":
     import threading
+
+    # ★ v3.8: 启动时回放历史对话 → 语言史 (骨架池吸收对话句式)
+    try:
+        _r = _REPLAY.replay_history(limit=600)
+        print(f"  💬 对话语料回放: {_r}")
+    except Exception as e:
+        print(f"  ⚠️ replay: {e}")
 
     # 后台记忆巩固线程: 每 120 秒跑一次
     def _consolidation_loop():

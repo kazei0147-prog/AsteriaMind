@@ -79,13 +79,17 @@ class LanguageModel:
 
     # ── 1. 骨架挖掘 ──
     def mine(self, min_count: int = 1) -> dict:
-        """从 language_traces 挖句式骨架 → 按关系分类统计"""
+        """从 language_traces 挖句式骨架 → 按关系分类统计
+        ★ v3.8: user_dialogue 加权 ×5 — 对话句式是"目标语言", 优先采到
+        """
         pool = Counter()
         n_sent = 0
         rows = self.conn.execute(
-            "SELECT sentence FROM language_traces").fetchall()
-        for (sent,) in rows:
+            "SELECT sentence, sentence_type FROM language_traces").fetchall()
+        for sent, stype in rows:
             n_sent += 1
+            # 对话语料加权: 用户的话是她该学的说话方式 (×5)
+            w = 5 if stype == "user_dialogue" else 1
             for m in re.finditer(
                     r"([^，。；！？]{1,10})(" + _REL_PATTERN +
                     r")([^，。；！？]{1,10})", sent):
@@ -107,7 +111,7 @@ class LanguageModel:
                 leftover = leftover.replace(rel, "")
                 if any(ch not in _ALLOWED_CHARS for ch in leftover):
                     continue
-                pool[(rel_type, skeleton)] += 1
+                pool[(rel_type, skeleton)] += w
         # 存统计
         self._pool = {rel: [] for rel in _REL_WORDS}
         for (rel, sk), c in pool.items():
