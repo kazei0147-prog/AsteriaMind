@@ -532,6 +532,8 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
             self._serve_graph_page()
         elif self.path == "/galaxy":
             self._serve_galaxy_page()
+        elif self.path.startswith("/vendor/"):
+            self._serve_vendor(self.path)
         elif self.path.startswith("/api/modules"):
             self._handle_modules()
         elif self.path == "/api/stats":
@@ -590,6 +592,23 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(CHAT_HTML.encode('utf-8'))
+
+    def _serve_vendor(self, path):
+        """★ v3.8b: 本地静态库 (three.js 等) — 断网可用, 零外链"""
+        import os as _os
+        fname = _os.path.basename(path)
+        fpath = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "vendor", fname)
+        if not fname.endswith(".js") or not _os.path.isfile(fpath):
+            self.send_error(404)
+            return
+        with open(fpath, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_graph_page(self):
         """★ v3.6: 知识能量视图 (③) — 星图热力仪表盘"""
@@ -721,33 +740,26 @@ function exploreNode(el){ document.getElementById('entInput').value = el.getAttr
         self.wfile.write(html.encode('utf-8'))
 
     def _serve_galaxy_page(self):
-        """★ v3.8: 知识星系 — Canvas 点阵星云 (零依赖, 替代 Cytoscape)
+        """★ v3.8c: 知识星系 — three.js 3D 点阵星云 (本地组件, 零外链)
 
-        多维点阵星云: 中心金核=分类中枢(hub), 外围=向日葵旋臂星云
-          亮度=能量 / 颜色=类型(金=中枢, 橙=高熵, 蓝白=正常) / 大小=度数
-          默认不画边 → 永不拥挤; 点击/搜索某颗星才展开它的局部链接(≤33条)
+        银河系式扁平旋涡星云: 中心金核=分类中枢, 3条旋臂=普通实体
+          发光圆点(亮度=能量/颜色=类型/大小=度数) + 3000背景星尘 + 缓慢自转
+          点击恒星才展开局部链接(细发光管, ≤33条) → 永不拥挤
         """
         html = """<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AM 知识星系 · 点阵星云</title>
+<title>AM 知识星系 · 3D 星云</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%}
-body{
-  background:#050810;
-  background-image:
-    radial-gradient(1100px 500px at 78% -8%, rgba(31,111,235,.16), transparent 62%),
-    radial-gradient(900px 520px at 8% 108%, rgba(163,113,247,.13), transparent 60%),
-    radial-gradient(1200px 600px at 50% 50%, rgba(3,5,10,0) 0%, rgba(3,5,10,.65) 100%);
-  color:#e6edf3;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
-  overflow:hidden;
-}
-#cv{position:fixed;inset:0;display:block;cursor:grab;touch-action:none}
-#cv.dragging{cursor:grabbing}
+html,body{height:100%;overflow:hidden}
+body{background:#04070f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+#scene-container{position:fixed;inset:0}
+#scene-container canvas{display:block}
+#scene-container .label{position:absolute;pointer-events:none;font-size:13px;font-weight:600;color:#fff;text-shadow:0 0 8px rgba(0,0,0,.95),0 1px 3px #000;white-space:nowrap;transform:translate(-50%,-130%);background:rgba(4,7,15,.55);padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.15);backdrop-filter:blur(3px)}
+#scene-container .label.hub{color:#ffd76a;border-color:rgba(255,215,106,.4)}
 a{color:#8b949e;text-decoration:none}
 #info{position:fixed;top:14px;left:16px;z-index:10;font-size:13px;color:#8b949e;text-shadow:0 1px 6px rgba(0,0,0,.8);max-width:70vw}
 #info b{color:#58a6ff}
@@ -762,7 +774,7 @@ a{color:#8b949e;text-decoration:none}
 #search-list{position:absolute;top:44px;left:0;right:0;background:rgba(22,27,34,.95);border:1px solid #30363d;border-radius:10px;display:none;max-height:220px;overflow-y:auto;backdrop-filter:blur(8px);z-index:13}
 #search-list div{padding:8px 12px;font-size:13px;color:#8b949e;cursor:pointer;border-bottom:1px solid rgba(48,54,61,.5);display:flex;justify-content:space-between;gap:8px}
 #search-list div:last-child{border-bottom:none}
-#search-list div:hover,#search-list div.sel{color:#58a6ff;background:rgba(88,166,255,.1)}
+#search-list div:hover{color:#58a6ff;background:rgba(88,166,255,.1)}
 #tip{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:10;font-size:12px;color:#8b949e;background:rgba(13,17,23,.7);border:1px solid rgba(48,54,61,.6);padding:7px 16px;border-radius:20px;white-space:nowrap;backdrop-filter:blur(6px)}
 #legend{position:fixed;left:16px;bottom:16px;z-index:10;font-size:11px;color:#8b949e;background:rgba(13,17,23,.72);border:1px solid rgba(48,54,61,.6);padding:9px 13px;border-radius:10px;backdrop-filter:blur(6px)}
 #legend .row{display:flex;align-items:center;gap:7px;margin:3px 0}
@@ -781,7 +793,8 @@ a{color:#8b949e;text-decoration:none}
 #card .rel .tgt:hover{color:#58a6ff;text-decoration:underline}
 #card .rel .e{color:#8b949e;font-size:10px;margin-left:auto}
 #card .sec{margin-top:10px;border-top:1px solid #30363d;padding-top:8px;font-size:11px;color:#8b949e}
-#card .tag{display:inline-block;background:rgba(139,148,158,.12);border:1px solid #30363d;border-radius:4px;padding:2px 7px;margin:3px 3px 0 0;font-size:11px;color:#8b949e}
+#card .tag{display:inline-block;background:rgba(139,148,158,.12);border:1px solid #30363d;border-radius:4px;padding:2px 7px;margin:3px 3px 0 0;font-size:11px;color:#8b949e;cursor:pointer}
+#card .tag:hover{color:#58a6ff;border-color:#58a6ff}
 #card .close{position:absolute;top:6px;right:8px;background:none;border:none;color:#8b949e;font-size:15px;cursor:pointer;padding:6px}
 #card .close:hover{color:#e6edf3}
 #load-tip{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;color:#8b949e;font-size:13px;display:none;text-align:center;line-height:1.8}
@@ -795,7 +808,7 @@ a{color:#8b949e;text-decoration:none}
 </style>
 </head>
 <body>
-<div id="info">🌌 <b>AM 知识星系</b> · 点阵星云</div>
+<div id="info">🌌 <b>AM 知识星系</b> · 3D 星云</div>
 <div id="navs">
   <a href="/">← 对话</a>
   <a href="/graph">能量视图</a>
@@ -805,13 +818,13 @@ a{color:#8b949e;text-decoration:none}
   <input id="search" placeholder="搜索恒星…" autocomplete="off">
   <div id="search-list"></div>
 </div>
-<div id="load-tip"><div class="spin"></div>正在校准望远镜…</div>
+<div id="load-tip"><div class="spin"></div>正在展开星云…</div>
 <div id="tooltip"></div>
 <div id="card"><button class="close" onclick="hideCard()">✕</button><div id="card-body"></div></div>
-<canvas id="cv"></canvas>
-<div id="tip">拖动平移 · 滚轮/双指缩放 · 点击恒星展开链接 · 点空白收起</div>
+<div id="scene-container"></div>
+<div id="tip">拖拽旋转 · 滚轮/双指缩放 · 点击恒星展开链接 · 点空白收起</div>
 <div id="legend">
-  <div class="row"><span class="dot" style="background:#d4af37"></span>中枢分类 (金核)</div>
+  <div class="row"><span class="dot" style="background:#ffd76a"></span>中枢分类 (金核)</div>
   <div class="row"><span class="dot" style="background:#f0883e"></span>高熵 · 知识模糊</div>
   <div class="row"><span class="dot" style="background:#58a6ff"></span>正常实体 (蓝白)</div>
   <div class="row"><span class="sw" style="background:#3fb950"></span>IS_A 分类</div>
@@ -822,187 +835,231 @@ a{color:#8b949e;text-decoration:none}
   <div class="row"><span class="sw" style="background:#f0883e"></span>LIVES_IN 栖息</div>
   <div class="row"><span class="sw" style="background:#39c5cf"></span>ORBITS 环绕</div>
 </div>
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
+<script src="/vendor/CSS2DRenderer.js"></script>
 <script>
 const relColor = {'IS_A':'#3fb950','CAN':'#58a6ff','NOT_CAN':'#f85149','HAS':'#d29922','EATS':'#a371f7','LIVES_IN':'#f0883e','ORBITS':'#39c5cf'};
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
-const W = 1800, H = 1100;              /* 世界尺寸 */
-let dpr = 1, cw = 0, ch = 0;
+const container = document.getElementById('scene-container');
+const tooltipEl = document.getElementById('tooltip');
+const searchEl = document.getElementById('search');
+const listEl = document.getElementById('search-list');
 let nodes = [], byName = new Map(), hotSet = new Set();
 let maxDeg = 1, maxE = 1;
-let view = {cx: W/2, cy: H/2, scale: 1};
-let hover = null, sel = null, selNode = null, selData = null, neighbors = new Set();
-let dragging = false, moved = false, lastX = 0, lastY = 0;
-let anim = null, tipTimer = null;
-const GOLD = 2.39996;
-/* 背景星尘 */
-const dust = [];
-for(let i = 0; i < 130; i++) dust.push({x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.1 + 0.25, p: Math.random()*6.28});
+let sel = null, selNode = null, selData = null, neighbors = new Set();
+let hoverName = null;
+let camAnim = null;
 
-function hash(v){ let s = (v * 2654435761) >>> 0; s = (s ^ (s >> 16)) >>> 0; return s; }
-function toScreen(wx, wy){ return [(wx - view.cx)*view.scale + cw/2, (wy - view.cy)*view.scale + ch/2]; }
-function toWorld(sx, sy){ return [(sx - cw/2)/view.scale + view.cx, (sy - ch/2)/view.scale + view.cy]; }
-
-function resize(){
-  dpr = window.devicePixelRatio || 1;
-  cw = cv.clientWidth; ch = cv.clientHeight;
-  cv.width = cw * dpr; cv.height = ch * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  fitView();
+/* ── three.js 场景 ── */
+let scene, camera, renderer, controls, labelRenderer;
+let galaxyGroup, linksGroup, bgPoints;
+let glowTex;
+let cw = 0, ch = 0;
+function hexToInt(h){ return parseInt(h.slice(1), 16); }
+function makeGlowTexture(){
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(0.6, 'rgba(255,255,255,0.25)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.Texture(c);
+  t.needsUpdate = true;
+  return t;
 }
-function fitView(){
-  view.scale = Math.max(0.25, Math.min(cw/W, ch/H) * 0.92);
-  view.cx = W/2; view.cy = H/2;
-  draw();
+function init3d(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x04070f);
+  camera = new THREE.PerspectiveCamera(55, cw / ch, 1, 4000);
+  camera.position.set(360, 240, 460);
+  renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(cw, ch);
+  container.appendChild(renderer.domElement);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 30;
+  controls.maxDistance = 1200;
+  labelRenderer = new THREE.CSS2DRenderer();
+  labelRenderer.domElement.style.position = 'absolute';
+  labelRenderer.domElement.style.top = '0';
+  labelRenderer.domElement.style.pointerEvents = 'none';
+  container.appendChild(labelRenderer.domElement);
+  galaxyGroup = new THREE.Group();
+  linksGroup = new THREE.Group();
+  galaxyGroup.add(linksGroup);
+  scene.add(galaxyGroup);
+  glowTex = makeGlowTexture();
+  addBackgroundDust();
 }
-/* 布局: 中心金核(hub) + 向日葵均匀旋臂 */
+function addBackgroundDust(){
+  const n = 3000;
+  const pos = new Float32Array(n * 3);
+  for(let i = 0; i < n; i++){
+    const r = 420 + Math.random() * 900;
+    const a = Math.random() * 6.283;
+    const b = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(b) * Math.cos(a);
+    pos[i*3+1] = r * Math.cos(b) * 0.6;
+    pos[i*3+2] = r * Math.sin(b) * Math.sin(a);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({color: 0x7788aa, size: 1.3, transparent: true, opacity: 0.55, sizeAttenuation: true, depthWrite: false});
+  bgPoints = new THREE.Points(geo, mat);
+  scene.add(bgPoints);
+}
+function gauss(){ return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; }
+/* ── 布局: 银河扁平旋涡 — 中心金核 + 3条旋臂 ── */
 function layout(){
   const hubs = nodes.filter(n => n.hub);
   const stars = nodes.filter(n => !n.hub);
-  const maxR = Math.min(W, H) * 0.46;
   const N = stars.length || 1;
+  const R = 190;
   stars.forEach((n, i) => {
-    const r = maxR * Math.sqrt(i / N);
-    const a = i * GOLD + (hash(i) % 1000) / 1000 * 0.06;
-    n.x = W/2 + Math.cos(a) * r + ((hash(i*7+3) % 200) - 100) / 100 * maxR * 0.02;
-    n.y = H/2 + Math.sin(a) * r + ((hash(i*13+5) % 200) - 100) / 100 * maxR * 0.02;
+    const t = i / N;
+    const arm = i % 3;
+    const a = t * 13.8 + arm * 2.094;
+    const r = R * Math.sqrt(t) * (0.8 + 0.2 * Math.sin(t * 40));
+    n.pos = new THREE.Vector3(Math.cos(a) * r + gauss() * 8, gauss() * 13, Math.sin(a) * r + gauss() * 8);
   });
   const M = hubs.length || 1;
   hubs.forEach((n, i) => {
-    const r = maxR * 0.16 * Math.sqrt(i / M) + 14;
-    const a = i * GOLD * 2.1;
-    n.x = W/2 + Math.cos(a) * r;
-    n.y = H/2 + Math.sin(a) * r;
+    const t = i / M;
+    const a = t * 6.283 * 3 + (i % 5) * 0.15;
+    const r = 34 * Math.sqrt(t) + 5;
+    n.pos = new THREE.Vector3(Math.cos(a) * r, gauss() * 5, Math.sin(a) * r);
   });
 }
-/* ── 渲染循环 ── */
-function draw(ts){
-  const t = ((ts || 0) - (window._t0 || 0)) / 1000;
-  ctx.clearRect(0, 0, cw, ch);
-  /* 背景星尘 */
-  ctx.fillStyle = 'rgba(200,215,255,0.5)';
-  for(const d of dust){
-    const [sx, sy] = toScreen(d.x, d.y);
-    if(sx < -10 || sx > cw+10 || sy < -10 || sy > ch+10) continue;
-    ctx.globalAlpha = 0.18 + 0.14 * Math.sin(t * 1.4 + d.p);
-    ctx.fillRect(sx, sy, d.r, d.r);
-  }
-  ctx.globalAlpha = 1;
-  /* 选中点的局部链接 */
-  if(sel && selData && selNode){
-    const [sx0, sy0] = toScreen(selNode.x, selNode.y);
-    const edges = (selData.out_edges || []).map(e => ({rel: e.relation, target: e.target, rev: false}))
-      .concat((selData.in_edges || []).map(e => ({rel: e.relation, target: e.source, rev: true})));
-    edges.forEach(e => {
-      const nn = byName.get(e.target);
-      if(!nn) return;
-      const [ex, ey] = toScreen(nn.x, nn.y);
-      ctx.strokeStyle = (relColor[e.rel] || '#888') + (e.rev ? '44' : '77');
-      ctx.lineWidth = e.rev ? 1 : 1.4;
-      ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(ex, ey); ctx.stroke();
-    });
-  }
-  /* 恒星 */
+/* ── 星点 Sprite ── */
+function nodeColor(n){
+  if(n.hub) return '#ffd76a';
+  if(hotSet.has(n.entity)) return '#f0883e';
+  return '#58a6ff';
+}
+function nodeSize(n){
+  if(n.hub) return 9 + Math.min(13, n.edges * 0.55);
+  return 3 + Math.min(8, 3.4 * Math.log2(1 + n.edges) / Math.log2(2 + maxDeg));
+}
+function buildStars(){
   nodes.forEach(n => {
-    const [sx, sy] = toScreen(n.x, n.y);
-    if(sx < -40 || sx > cw+40 || sy < -40 || sy > ch+40) return;
-    const isSel = sel === n.entity;
-    const isNei = isSel || (neighbors.has(n.entity));
-    let alpha;
-    if(isSel) alpha = 1;
-    else if(isNei) alpha = 0.95;
-    else if(sel) alpha = (n.hub ? 0.3 : 0.13);
-    else alpha = 0.5 + 0.45 * Math.min(1, n.energy / maxE);
-    let rr = n.r * (isSel ? 1.9 : (hover === n.entity ? 1.45 : 1));
-    if(n.hub){
-      const pulse = 0.72 + 0.28 * Math.sin(t * 1.6 + n.x * 0.02);
-      ctx.shadowColor = n.color; ctx.shadowBlur = 15 * pulse;
-    }
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = n.color;
-    ctx.beginPath(); ctx.arc(sx, sy, rr, 0, 6.2832); ctx.fill();
-    ctx.shadowBlur = 0;
-    if(isSel){
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.85;
-      ctx.beginPath(); ctx.arc(sx, sy, rr + 4, 0, 6.2832); ctx.stroke();
+    n.size = nodeSize(n);
+    const mat = new THREE.SpriteMaterial({map: glowTex, color: hexToInt(nodeColor(n)), transparent: true, depthWrite: false, opacity: 1});
+    const sp = new THREE.Sprite(mat);
+    sp.position.copy(n.pos);
+    sp.scale.set(n.size, n.size, 1);
+    sp.userData.name = n.entity;
+    n.sprite = sp;
+    galaxyGroup.add(sp);
+  });
+}
+/* ── 局部链接: 细发光管 ── */
+function clearLinks(){
+  while(linksGroup.children.length){
+    const c = linksGroup.children.pop();
+    if(c.geometry) c.geometry.dispose();
+    if(c.material) c.material.dispose();
+  }
+}
+function addTube(a, b, color){
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  if(len < 0.001) return;
+  const geo = new THREE.CylinderGeometry(0.3, 0.3, len, 6, 1);
+  const mat = new THREE.MeshBasicMaterial({color: color, transparent: true, opacity: 0.85});
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(a).add(dir.clone().multiplyScalar(0.5));
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  linksGroup.add(mesh);
+}
+function buildLinks(d){
+  clearLinks();
+  if(!selNode) return;
+  const edges = (d.out_edges || []).map(e => ({rel: e.relation, target: e.target}))
+    .concat((d.in_edges || []).map(e => ({rel: e.relation, target: e.source})));
+  edges.forEach(e => {
+    const nn = byName.get(e.target);
+    if(!nn) return;
+    addTube(selNode.pos, nn.pos, hexToInt(relColor[e.rel] || '#888888'));
+  });
+}
+/* ── 亮度: 选中时非邻居变暗 ── */
+function updateBrightness(){
+  nodes.forEach(n => {
+    const m = n.sprite.material;
+    if(sel){
+      if(n.entity === sel){ m.opacity = 1; n.sprite.scale.set(n.size * 1.6, n.size * 1.6, 1); }
+      else if(neighbors.has(n.entity)){ m.opacity = 1; n.sprite.scale.set(n.size * 1.25, n.size * 1.25, 1); }
+      else { m.opacity = 0.14; }
+    } else {
+      m.opacity = 1;
+      n.sprite.scale.set(n.size, n.size, 1);
     }
   });
-  ctx.globalAlpha = 1;
-  /* 标签 */
-  if(sel && selNode){
-    const [sx, sy] = toScreen(selNode.x, selNode.y);
-    ctx.font = '600 15px system-ui'; ctx.textAlign = 'center';
-    ctx.fillStyle = '#fff'; ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
-    ctx.fillText(sel, sx, sy - selNode.r * 2 - 10);
-    ctx.shadowBlur = 0;
-  }
-  if(hover && hover !== sel){
-    const n = byName.get(hover);
-    if(n){
-      const [sx, sy] = toScreen(n.x, n.y);
-      ctx.font = '12px system-ui'; ctx.textAlign = 'center';
-      ctx.fillStyle = '#c9d1d9'; ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-      ctx.fillText(n.entity, sx, sy - n.r - 6);
-      ctx.shadowBlur = 0;
-    }
-  }
-  requestAnimationFrame(draw);
 }
-/* ── 命中检测 ── */
-function hitTest(sx, sy){
-  const [wx, wy] = toWorld(sx, sy);
-  let best = null, bd = 1e18;
-  for(const n of nodes){
-    const dx = n.x - wx, dy = n.y - wy;
-    const d2 = dx*dx + dy*dy;
-    const hr = (n.r + 5) / view.scale;
-    if(d2 < hr*hr && d2 < bd){ bd = d2; best = n; }
-  }
-  return best;
+/* ── CSS2D 标签 ── */
+let labelObjs = [];
+function clearLabels(){
+  labelObjs.forEach(o => { scene.remove(o); if(o.element) o.element.remove(); });
+  labelObjs = [];
 }
-/* ── 视图: 拖拽 / 缩放 / 飞向 ── */
-function zoomAt(sx, sy, f){
-  const [wx, wy] = toWorld(sx, sy);
-  view.scale = Math.max(0.2, Math.min(9, view.scale * f));
-  view.cx = wx - (sx - cw/2) / view.scale;
-  view.cy = wy - (sy - ch/2) / view.scale;
-  draw();
+function setLabel(name, hub){
+  const el = document.createElement('div');
+  el.className = 'label' + (hub ? ' hub' : '');
+  el.textContent = name;
+  const obj = new THREE.CSS2DObject(el);
+  const n = byName.get(name);
+  obj.position.copy(n.pos);
+  scene.add(obj);
+  labelObjs.push(obj);
 }
-function animateTo(wx, wy, sc){
-  if(anim) cancelAnimationFrame(anim);
-  const from = {cx: view.cx, cy: view.cy, s: view.scale};
-  const toS = sc || view.scale;
-  const t0 = performance.now(), D = 480;
+/* ── 相机飞行 ── */
+function flyTo(pos, dist){
+  if(camAnim) cancelAnimationFrame(camAnim);
+  const fromT = controls.target.clone();
+  const fromP = camera.position.clone();
+  const dir = new THREE.Vector3().subVectors(fromP, fromT).normalize();
+  const toP = pos.clone().add(dir.multiplyScalar(dist));
+  const t0 = performance.now(), D = 600;
   function step(tt){
     const k = Math.min(1, (tt - t0) / D);
     const e = 1 - Math.pow(1 - k, 3);
-    view.cx = from.cx + (wx - from.cx) * e;
-    view.cy = from.cy + (wy - from.cy) * e;
-    view.scale = from.s + (toS - from.s) * e;
-    draw(tt);
-    if(k < 1) anim = requestAnimationFrame(step); else anim = null;
+    controls.target.lerpVectors(fromT, pos, e);
+    camera.position.lerpVectors(fromP, toP, e);
+    controls.update();
+    if(k < 1) camAnim = requestAnimationFrame(step); else camAnim = null;
   }
-  anim = requestAnimationFrame(step);
+  camAnim = requestAnimationFrame(step);
 }
-/* ── 选中 + 局部链接 ── */
-async function focus(name){
+/* ── 选中 / 数据卡 ── */
+async function selectEntity(name){
   const n = byName.get(name);
   if(!n) return;
   sel = name; selNode = n; selData = null;
   neighbors = new Set([name]);
-  animateTo(n.x, n.y, Math.max(view.scale, 1.5));
+  clearLinks();
+  updateBrightness();
+  clearLabels();
+  setLabel(name, n.hub);
+  flyTo(n.pos, 130);
   try{
     const d = await (await fetch('/api/entity/' + encodeURIComponent(name))).json();
     selData = d;
     (d.out_edges || []).forEach(e => neighbors.add(e.target));
     (d.in_edges || []).forEach(e => neighbors.add(e.source));
+    buildLinks(d);
+    updateBrightness();
     showCard(d);
-  }catch(e){ /* 连接失败时保留星形高亮 */ }
-  draw();
+  }catch(e){}
 }
 function clearSel(){
   sel = null; selNode = null; selData = null; neighbors = new Set();
-  hideCard(); draw();
+  clearLinks(); clearLabels(); updateBrightness(); hideCard();
 }
 function showCard(d){
   const body = document.getElementById('card-body');
@@ -1025,78 +1082,76 @@ function showCard(d){
       if(!box) return;
       if(v.neighbors && v.neighbors.length){
         box.innerHTML = v.neighbors.slice(0, 8).map(x =>
-          '<span class="tag" style="cursor:pointer" onclick="focus(\'' + x.word.replace(/'/g, '') + '\')">' + x.word + ' ' + x.sim.toFixed(2) + '</span>').join('');
+          '<span class="tag" onclick="focusFromTag(\'' + x.word.replace(/'/g, '') + '\')">' + x.word + ' ' + x.sim.toFixed(2) + '</span>').join('');
       } else box.innerHTML = '<span style="color:#8b949e">词表无此词 — 喂语料后会长出来</span>';
     }catch(e){ const box = document.getElementById('vnei'); if(box) box.innerHTML = '<span style="color:#8b949e">向量服务未启动</span>'; }
   })();
 }
 function escAttr(s){ return String(s).replace(/"/g, '&quot;'); }
-function focusFromCard(el){ focus(el.dataset.n); }
+function focusFromCard(el){ selectEntity(el.dataset.n); }
+function focusFromTag(w){ selectEntity(w); }
 function hideCard(){ document.getElementById('card').style.display = 'none'; }
-/* ── tooltip ── */
 function showTip(n, sx, sy){
-  if(!n){ document.getElementById('tooltip').style.display = 'none'; return; }
-  clearTimeout(tipTimer);
-  tipTimer = setTimeout(() => {
-    const tip = document.getElementById('tooltip');
-    tip.innerHTML = '<b>' + n.entity + '</b>' + (n.hub ? ' <span style="color:#d4af37">★中枢</span>' : '')
-      + '<div class="ttm">出边 ' + n.edges + ' · 能量 ' + n.energy.toFixed(1)
-      + (hotSet.has(n.entity) ? ' · <span style="color:#f0883e">高熵</span>' : '') + '</div>'
-      + '<div class="ttm" style="color:#484f58">点击展开链接</div>';
-    tip.style.display = 'block';
-    tip.style.left = Math.min(sx + 14, cw - 260) + 'px';
-    tip.style.top = Math.min(sy + 14, ch - 90) + 'px';
-  }, 260);
+  if(!n){ tooltipEl.style.display = 'none'; return; }
+  tooltipEl.innerHTML = '<b>' + n.entity + '</b>' + (n.hub ? ' <span style="color:#ffd76a">★中枢</span>' : '')
+    + '<div class="ttm">出边 ' + n.edges + ' · 能量 ' + n.energy.toFixed(1)
+    + (hotSet.has(n.entity) ? ' · <span style="color:#f0883e">高熵</span>' : '') + '</div>'
+    + '<div class="ttm" style="color:#484f58">点击展开链接</div>';
+  tooltipEl.style.display = 'block';
+  tooltipEl.style.left = Math.min(sx + 14, cw - 260) + 'px';
+  tooltipEl.style.top = Math.min(sy + 14, ch - 90) + 'px';
 }
-/* ── 交互绑定 ── */
-cv.addEventListener('pointerdown', e => {
-  cv.setPointerCapture(e.pointerId);
-  dragging = true; moved = false;
-  lastX = e.clientX; lastY = e.clientY;
-  cv.classList.add('dragging');
+/* ── 拾取与交互 ── */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let isDragging = false, downX = 0, downY = 0, moved = false;
+controls.addEventListener('start', () => { isDragging = true; });
+controls.addEventListener('end', () => { isDragging = false; moved = false; });
+function pick(e){
+  pointer.x = (e.clientX / cw) * 2 - 1;
+  pointer.y = -(e.clientY / ch) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(galaxyGroup.children.filter(c => c.isSprite), false);
+  return hits.length ? hits[0].object.userData.name : null;
+}
+container.addEventListener('pointerdown', e => {
+  downX = e.clientX; downY = e.clientY; moved = false;
 });
-cv.addEventListener('pointermove', e => {
-  if(dragging){
-    const dx = e.clientX - lastX, dy = e.clientY - lastY;
-    if(Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-    view.cx -= dx / view.scale; view.cy -= dy / view.scale;
-    lastX = e.clientX; lastY = e.clientY;
-    draw();
-  } else {
-    const n = hitTest(e.clientX, e.clientY);
-    if(n !== hover){ hover = n ? n.entity : null; showTip(n, e.clientX, e.clientY); }
-    draw();
+container.addEventListener('pointermove', e => {
+  if(!isDragging){
+    const name = pick(e);
+    if(name !== hoverName){
+      hoverName = name;
+      clearLabels();
+      if(sel) setLabel(sel, byName.get(sel).hub);
+      if(name && name !== sel){
+        const n = byName.get(name);
+        setLabel(name, n.hub);
+        showTip(n, e.clientX, e.clientY);
+      } else {
+        tooltipEl.style.display = 'none';
+      }
+    }
   }
 });
-cv.addEventListener('pointerup', e => {
-  if(!dragging) return;
-  dragging = false; cv.classList.remove('dragging');
-  if(moved){ moved = false; return; }
-  const n = hitTest(e.clientX, e.clientY);
-  if(n) focus(n.entity); else clearSel();
+container.addEventListener('pointerup', e => {
+  const dx = e.clientX - downX, dy = e.clientY - downY;
+  if(Math.abs(dx) + Math.abs(dy) > 6){ moved = true; return; }
+  const name = pick(e);
+  if(name) selectEntity(name); else clearSel();
 });
-cv.addEventListener('wheel', e => {
-  e.preventDefault();
-  zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.15 : 1/1.15);
-}, {passive: false});
-cv.addEventListener('dblclick', e => {
-  const n = hitTest(e.clientX, e.clientY);
-  if(n) focus(n.entity);
-});
-window.addEventListener('resize', resize);
+container.addEventListener('wheel', e => { /* OrbitControls 处理 */ }, {passive: false});
 /* ── 搜索 ── */
-const searchEl = document.getElementById('search');
-const listEl = document.getElementById('search-list');
 searchEl.addEventListener('input', () => {
   const q = searchEl.value.trim();
   if(!q){ listEl.style.display = 'none'; return; }
   const hits = nodes.filter(n => n.entity.indexOf(q) >= 0).slice(0, 8);
   if(!hits.length){ listEl.style.display = 'none'; return; }
-  listEl.innerHTML = hits.map((n, i) =>
+  listEl.innerHTML = hits.map(n =>
     '<div data-k="' + escAttr(n.entity) + '"><span>' + n.entity + '</span><span style="color:#484f58;font-size:10px">' + n.edges + '边</span></div>').join('');
   listEl.style.display = 'block';
   listEl.querySelectorAll('div').forEach(d => {
-    d.onclick = () => { searchEl.value = ''; listEl.style.display = 'none'; focus(d.dataset.k); };
+    d.onclick = () => { searchEl.value = ''; listEl.style.display = 'none'; selectEntity(d.dataset.k); };
   });
 });
 searchEl.addEventListener('keydown', e => {
@@ -1104,7 +1159,7 @@ searchEl.addEventListener('keydown', e => {
     const q = searchEl.value.trim();
     if(q){
       const n = nodes.find(x => x.entity === q) || nodes.filter(x => x.entity.indexOf(q) >= 0)[0];
-      if(n){ searchEl.value = ''; listEl.style.display = 'none'; focus(n.entity); }
+      if(n){ searchEl.value = ''; listEl.style.display = 'none'; selectEntity(n.entity); }
     }
   }
   if(e.key === 'Escape'){ listEl.style.display = 'none'; searchEl.blur(); }
@@ -1112,7 +1167,33 @@ searchEl.addEventListener('keydown', e => {
 document.addEventListener('click', e => {
   if(!e.target.closest('#search-wrap')) listEl.style.display = 'none';
 });
-/* ── 加载 ── */
+window.addEventListener('resize', () => {
+  cw = container.clientWidth; ch = container.clientHeight;
+  camera.aspect = cw / ch; camera.updateProjectionMatrix();
+  renderer.setSize(cw, ch);
+  labelRenderer.setSize(cw, ch);
+});
+/* ── 渲染循环 (3D 场景持续渲染, GPU 轻载) ── */
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  galaxyGroup.rotation.y += 0.0007;   /* 缓慢自转 */
+  if(selNode){
+    const pulse = 1 + 0.12 * Math.sin(performance.now() / 400);
+    selNode.sprite.scale.set(selNode.size * 1.6 * pulse, selNode.size * 1.6 * pulse, 1);
+  }
+  nodes.forEach(n => {
+    if(n.hub && !sel){
+      const p = 1 + 0.1 * Math.sin(performance.now() / 500 + n.pos.x * 0.02);
+      n.sprite.scale.set(n.size * p, n.size * p, 1);
+    }
+  });
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+/* ── 数据加载 ── */
 async function load(){
   document.getElementById('load-tip').style.display = 'block';
   try{
@@ -1126,19 +1207,15 @@ async function load(){
       const g2 = await (await fetch('/api/graph')).json();
       hotSet = new Set((g2.entropy_cloud || []).map(c => c.entity));
     }catch(e){}
-    nodes.forEach(n => { n.color = n.hub ? '#d4af37' : (hotSet.has(n.entity) ? '#f0883e' : '#58a6ff'); });
-    nodes.forEach(n => {
-      n.r = n.hub ? 8 + Math.min(8, n.edges * 0.35)
-                  : 1.8 + Math.min(5.2, 2.2 * Math.log2(1 + n.edges) / Math.log2(2 + maxDeg));
-    });
     byName = new Map(nodes.map(n => [n.entity, n]));
+    cw = container.clientWidth; ch = container.clientHeight;
+    init3d();
     layout();
-    resize();
+    buildStars();
+    requestAnimationFrame(animate);
     document.getElementById('load-tip').style.display = 'none';
-    window._t0 = performance.now();
-    requestAnimationFrame(draw);
   }catch(e){
-    document.getElementById('load-tip').innerHTML = '<div style="color:#f85149">星图加载失败: ' + e.message + '</div>';
+    document.getElementById('load-tip').innerHTML = '<div style="color:#f85149">星云加载失败: ' + e.message + '</div>';
   }
 }
 load();
