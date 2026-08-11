@@ -119,97 +119,386 @@ for r in db.query():
     kg.add(r["subject"], r["predicate"], r["object"], confidence=r["confidence"])
 
 CHAT_HTML = r"""<!DOCTYPE html>
-<html lang="zh">
+<html lang="zh" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AsteriaMind — 对话</title>
 <style>
+/* ── 主题变量: 暗色(默认) / 浅色 ── */
+:root{
+  --bg:#0d1117; --bg-grad:radial-gradient(1200px 600px at 70% -10%, rgba(31,111,235,.13), transparent 60%), radial-gradient(900px 500px at 0% 110%, rgba(163,113,247,.09), transparent 55%);
+  --panel:#161b22; --panel2:#21262d; --border:#30363d;
+  --text:#e6edf3; --text2:#c9d1d9; --muted:#8b949e; --faint:#484f58;
+  --accent:#58a6ff; --accent-soft:rgba(88,166,255,.14);
+  --user:#238636; --user-hover:#2ea043; --user-text:#fff;
+  --am:#21262d; --am-border:#30363d;
+  --danger:#f85149; --warn:#d29922; --ok:#3fb950; --violet:#a371f7; --cyan:#39c5cf;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --radius:14px;
+}
+html[data-theme="light"]{
+  --bg:#f6f8fa; --bg-grad:radial-gradient(1200px 600px at 70% -10%, rgba(9,105,218,.08), transparent 60%), radial-gradient(900px 500px at 0% 110%, rgba(130,80,223,.06), transparent 55%);
+  --panel:#fff; --panel2:#f6f8fa; --border:#d0d7de;
+  --text:#1f2328; --text2:#24292f; --muted:#57606a; --faint:#8c959f;
+  --accent:#0969da; --accent-soft:rgba(9,105,218,.1);
+  --user:#1f883d; --user-hover:#2ea043; --user-text:#fff;
+  --am:#fff; --am-border:#d0d7de;
+  --danger:#cf222e; --warn:#9a6700; --ok:#1a7f37; --violet:#8250df; --cyan:#0e7490;
+  --shadow:0 10px 30px rgba(140,149,159,.16);
+}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#0d1117;color:#c9d1d9;font-family:system-ui;display:flex;flex-direction:column;height:100vh}
-#header{background:#161b22;padding:12px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:8px}
-#header h1{font-size:16px;color:#58a6ff}
-#header .dot{width:8px;height:8px;background:#3fb950;border-radius:50%;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
-#chat{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:80%;padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.5;animation:slideIn .3s}
-@keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.msg.user{align-self:flex-end;background:#238636;color:#fff}
-.msg.am{align-self:flex-start;background:#21262d;border:1px solid #30363d}
-.msg.error{align-self:flex-start;background:#490202;border:1px solid #f85149;color:#f85149}
-.msg .meta{font-size:11px;color:#8b949e;margin-bottom:4px}
-.msg.am .meta{color:#58a6ff}
-#input-area{background:#161b22;padding:12px 16px;border-top:1px solid #30363d;display:flex;gap:8px}
-#input-area input{flex:1;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 14px;color:#c9d1d9;font-size:14px;outline:none}
-#input-area input:focus{border-color:#58a6ff}
-#input-area button{background:#238636;color:white;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font-size:14px}
-#input-area button:hover{background:#2ea043}
-#stats{background:#161b22;padding:8px 16px;border-top:1px solid #30363d;display:flex;gap:16px;font-size:12px;color:#8b949e}
-.hint{font-size:11px;color:#484f58;margin-top:4px}
+html,body{height:100%}
+body{background:var(--bg);background-image:var(--bg-grad);background-attachment:fixed;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+button{font-family:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ── 顶栏 ── */
+#header{background:var(--panel);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;z-index:30}
+#header .logo{display:flex;align-items:center;gap:8px;min-width:0}
+#header .orb{width:10px;height:10px;background:var(--ok);border-radius:50%;animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 var(--ok)}50%{opacity:.45;box-shadow:0 0 0 5px transparent}}
+#header h1{font-size:15px;color:var(--text);font-weight:650;white-space:nowrap}
+#header h1 span{color:var(--accent)}
+#header .sub{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nav{display:flex;gap:2px;margin-left:auto;background:var(--panel2);padding:3px;border-radius:10px;border:1px solid var(--border)}
+#nav a{display:flex;align-items:center;gap:5px;text-decoration:none;color:var(--muted);font-size:12px;padding:6px 10px;border-radius:8px;transition:all .15s;min-height:34px}
+#nav a:hover{color:var(--text);background:var(--bg)}
+#nav a.active{color:var(--accent);background:var(--accent-soft);font-weight:600}
+#header .tools{display:flex;gap:4px;align-items:center}
+.ibtn{display:flex;align-items:center;justify-content:center;width:38px;height:38px;min-height:38px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--muted);transition:all .15s;flex-shrink:0}
+.ibtn:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.ibtn.danger:hover{color:var(--danger);border-color:var(--danger);background:rgba(248,81,73,.08)}
+
+/* ── 聊天区 ── */
+#chat{flex:1;overflow-y:auto;padding:18px 14px;display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch}
+#chat-inner{width:100%;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:82%;padding:10px 14px;border-radius:var(--radius);font-size:14px;line-height:1.65;animation:slideIn .25s ease;word-break:break-word;position:relative}
+@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.msg .meta{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.msg .badge{font-size:10px;font-weight:700;letter-spacing:.5px;padding:2px 7px;border-radius:6px;line-height:1.4}
+.b-user{background:rgba(63,185,80,.15);color:var(--ok)}
+.b-am{background:var(--accent-soft);color:var(--accent)}
+.b-err{background:rgba(248,81,73,.12);color:var(--danger)}
+.b-learn{background:rgba(163,113,247,.14);color:var(--violet)}
+.b-conf{background:rgba(248,81,73,.12);color:var(--danger)}
+.b-fuzzy{background:rgba(57,197,207,.12);color:var(--cyan)}
+.b-idle{background:rgba(139,148,158,.12);color:var(--muted)}
+.msg .ts{margin-left:auto;font-size:10px;color:var(--faint)}
+.msg.user{align-self:flex-end;background:var(--user);color:var(--user-text);border-bottom-right-radius:6px;box-shadow:var(--shadow)}
+.msg.user .badge{background:rgba(255,255,255,.2);color:var(--user-text)}
+.msg.user .ts{color:rgba(255,255,255,.65)}
+.msg.am{align-self:flex-start;background:var(--am);border:1px solid var(--am-border);border-bottom-left-radius:6px;box-shadow:var(--shadow)}
+.msg.error{align-self:flex-start;background:var(--am);border:1px solid var(--danger);border-bottom-left-radius:6px}
+.msg.error .text{color:var(--danger)}
+.msg code{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.msg pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:6px 0;font-size:12.5px;line-height:1.5}
+.msg pre code{background:none;border:none;padding:0}
+.msg a{color:var(--accent);text-decoration:none}
+.msg a:hover{text-decoration:underline}
+.msg .li{display:block;padding-left:2px}
+.copybtn{position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--muted);display:none;align-items:center;justify-content:center;padding:0}
+.msg.am:hover .copybtn{display:flex}
+.copybtn:hover{color:var(--accent);border-color:var(--accent)}
+
+/* 打字指示器 */
+.msg.typing .dots{display:flex;gap:5px;padding:4px 2px}
+.msg.typing .dots span{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:bounce 1.2s infinite}
+.msg.typing .dots span:nth-child(2){animation-delay:.15s}
+.msg.typing .dots span:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}
+
+/* ── 快捷提示 ── */
+#chips{flex-shrink:0;padding:8px 14px 0;display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+#chips::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;min-height:34px;padding:6px 13px;border-radius:18px;border:1px solid var(--border);background:var(--panel2);color:var(--muted);font-size:12.5px;transition:all .15s;white-space:nowrap}
+.chip:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+
+/* ── 输入区 ── */
+#input-area{background:var(--panel);border-top:1px solid var(--border);padding:12px 14px calc(12px + env(safe-area-inset-bottom));flex-shrink:0}
+#input-wrap{width:100%;max-width:760px;margin:0 auto;display:flex;align-items:flex-end;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:6px 6px 6px 14px;transition:border-color .2s, box-shadow .2s}
+#input-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+#msg-input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:16px;line-height:1.5;resize:none;max-height:120px;padding:7px 0;font-family:inherit}
+#msg-input::placeholder{color:var(--faint)}
+#send-btn{display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-height:44px;border-radius:12px;border:none;background:var(--user);color:var(--user-text);transition:all .15s;flex-shrink:0}
+#send-btn:hover{background:var(--user-hover)}
+#send-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── 状态栏 ── */
+#stats{background:var(--panel);border-top:1px solid var(--border);padding:6px 14px calc(6px + env(safe-area-inset-bottom));font-size:11px;color:var(--faint);display:flex;gap:16px;flex-wrap:wrap;flex-shrink:0}
+#stats .cnt{color:var(--muted)}
+
+/* ── 确认弹窗 ── */
+#modal{position:fixed;inset:0;z-index:99;background:rgba(1,4,9,.55);display:none;align-items:center;justify-content:center;padding:20px}
+#modal.show{display:flex}
+#modal .box{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:22px;max-width:340px;width:100%;box-shadow:var(--shadow);animation:pop .2s ease}
+@keyframes pop{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
+#modal h3{font-size:15px;margin-bottom:8px;color:var(--text)}
+#modal p{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:18px}
+#modal .actions{display:flex;gap:10px;justify-content:flex-end}
+#modal button{min-height:42px;padding:0 18px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13.5px;font-weight:600;transition:all .15s}
+#modal button:hover{background:var(--bg)}
+#modal button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+#modal button.danger:hover{background:#da3633}
+
+/* ── 移动端 ── */
+@media (max-width:640px){
+  #header{flex-wrap:wrap;gap:8px;padding:8px 10px}
+  #header .sub{display:none}
+  #nav{order:10;width:100%;justify-content:center}
+  #nav a{flex:1;justify-content:center}
+  .msg{max-width:92%}
+  #chat{padding:12px 10px}
+  #chips{padding:6px 10px 0}
+  #input-area{padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+  .copybtn{display:flex;opacity:.6}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
 </style>
 </head>
 <body>
-<div id="header"><span class="dot"></span><h1>AsteriaMind v3.2</h1><span style="color:#8b949e;font-size:12px">自然语言对话</span></div>
-<div id="chat">
-  <div class="msg am"><div class="meta">🧠 AM</div>你好！我是 AsteriaMind。你可以：
-  <br>· 告诉我事实：<i>地球是行星</i>
-  <br>· 问我问题：<i>咖啡能让人清醒吗</i>
-  <br>· 让我算数：<i>2+3×5 等于多少</i>
-  <br>· 叫我搜索：<i>查一下黑洞</i></div>
+<div id="header">
+  <div class="logo"><span class="orb"></span><h1>AsteriaMind <span>v3.2</span></h1></div>
+  <span class="sub">自然语言对话 · 自发学习</span>
+  <div id="nav">
+    <a href="/" class="active"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>对话</a>
+    <a href="/graph"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>能量视图</a>
+    <a href="/galaxy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2z"/></svg>知识星系</a>
+  </div>
+  <div class="tools">
+    <button class="ibtn" id="theme-btn" title="切换深浅主题" onclick="toggleTheme()"></button>
+    <button class="ibtn" title="导出聊天记录备份" onclick="exportChat()"></button>
+    <button class="ibtn" title="导入聊天记录恢复" onclick="importFile.click()"></button>
+    <button class="ibtn danger" title="清空对话记录" onclick="askClear()"></button>
+  </div>
+</div>
+<div id="chat"><div id="chat-inner"></div></div>
+<div id="chips">
+  <button class="chip" onclick="fill('企鹅是一种鸟类')">教我知识</button>
+  <button class="chip" onclick="fill('咖啡能让人清醒吗？')">问我问题</button>
+  <button class="chip" onclick="fill('2+3×5 等于多少')">让我算数</button>
+  <button class="chip" onclick="fill('查一下黑洞')">叫我搜索</button>
+  <button class="chip" onclick="fill('蛇会飞吗？')">考考她</button>
 </div>
 <div id="input-area">
-  <input id="msg-input" placeholder="说点什么..." autofocus onkeydown="if(event.key==='Enter')send()">
-  <button onclick="send()">发送</button>
+  <div id="input-wrap">
+    <textarea id="msg-input" placeholder="说点什么…（Enter 发送 / Shift+Enter 换行）" rows="1"></textarea>
+    <button id="send-btn" onclick="send()" title="发送"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+  </div>
 </div>
-<div id="stats">数据库: ... | 模板: 6 | 模块就绪</div>
+<div id="stats"><span class="cnt" id="msg-count"></span><span id="backend-stats">连接中…</span></div>
+<div id="modal"><div class="box">
+  <h3>清空对话记录？</h3>
+  <p id="modal-desc">将删除本地保存的全部消息，此操作不可恢复。建议先导出备份。</p>
+  <div class="actions"><button onclick="closeModal()">取消</button><button class="danger" onclick="doClear()">确认清空</button></div>
+</div></div>
+<input type="file" id="importFile" accept=".json,application/json" hidden>
 <script>
-const chat = document.getElementById('chat');
+const chat = document.getElementById('chat-inner');
 const input = document.getElementById('msg-input');
-const stats = document.getElementById('stats');
+const statsEl = document.getElementById('backend-stats');
+const countEl = document.getElementById('msg-count');
+const sendBtn = document.getElementById('send-btn');
+const LS_KEY = 'wb_amchat_msgs';
+const TH_KEY = 'wb_amchat_theme';
+let msgs = [];
+let sending = false;
+let typingEl = null;
 
-function addMsg(text, cls, meta) {
-    const div = document.createElement('div');
-    div.className = 'msg ' + cls;
-    div.innerHTML = (meta ? '<div class="meta">' + meta + '</div>' : '') + text;
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
+/* ── 主题 ── */
+const ICONS = {
+  moon: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+  sun: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  dl: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+  trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
+};
+function renderThemeBtn(){
+  const btn = document.getElementById('theme-btn');
+  const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+  btn.innerHTML = dark ? ICONS.sun : ICONS.moon;  /* 显示"目标", 点击切换 */
+}
+function initTheme(){
+  let t = localStorage.getItem(TH_KEY);
+  if(!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  renderThemeBtn();
+}
+function toggleTheme(){
+  const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem(TH_KEY, t);
+  renderThemeBtn();
+}
+(function(){  /* 工具按钮图标 */
+  const tools = document.querySelectorAll('#header .tools .ibtn');
+  tools[1].innerHTML = ICONS.dl;
+  tools[2].innerHTML = ICONS.up;
+  tools[3].innerHTML = ICONS.trash;
+})();
+
+/* ── 渲染: 轻量 Markdown (先转义再渲染, 防注入) ── */
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function renderMD(s){
+  s = esc(s);
+  s = s.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>');
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/^[-•]\s+(.+)$/gm, '<span class="li">• $1</span>');
+  return s.replace(/\n/g, '<br>');
+}
+const KIND_META = {
+  user:{badge:'b-user', label:'你'},
+  am:{badge:'b-am', label:'AM'},
+  error:{badge:'b-err', label:'错误'},
+  learned:{badge:'b-learn', label:'AM 分享'},
+  conflict:{badge:'b-conf', label:'AM 质疑'},
+  fuzzy:{badge:'b-fuzzy', label:'AM 求知'},
+  idle:{badge:'b-idle', label:'AM 自语'}
+};
+function fmtTime(ts){
+  const d = new Date(ts);
+  return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+}
+function addMsgEl(m){
+  const div = document.createElement('div');
+  const k = KIND_META[m.kind] || KIND_META.idle;
+  const isUser = m.kind === 'user';
+  div.className = 'msg ' + (m.kind==='error' ? 'error' : isUser ? 'user' : 'am');
+  const body = (m.kind==='user') ? esc(m.text).replace(/\n/g,'<br>') : renderMD(m.text);
+  div.innerHTML = '<div class="meta"><span class="badge '+k.badge+'">'+k.label+'</span><span class="ts">'+fmtTime(m.ts||Date.now())+'</span></div>'
+    + '<div class="text">'+body+'</div>'
+    + (isUser ? '' : '<button class="copybtn" title="复制" onclick="copyMsg(this)"></button>');
+  const cp = div.querySelector('.copybtn');
+  if(cp) cp.innerHTML = ICONS.copy || '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  chat.appendChild(div);
+  return div;
+}
+function copyMsg(btn){
+  const text = btn.closest('.msg').querySelector('.text').innerText;
+  navigator.clipboard.writeText(text).then(()=>{
+    const old = btn.innerHTML; btn.innerHTML = '<span style="font-size:10px;color:var(--ok)">✓</span>';
+    setTimeout(()=>{btn.innerHTML = old;}, 1200);
+  });
+}
+function scrollBottom(){ const c = document.getElementById('chat'); c.scrollTop = c.scrollHeight; }
+function push(m){ msgs.push(m); save(); addMsgEl(m); scrollBottom(); updateCount(); }
+function updateCount(){ countEl.textContent = '本地记录 ' + msgs.length + ' 条'; }
+
+/* ── 持久化 ── */
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(msgs)); }catch(e){} }
+function load(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){ const arr = JSON.parse(raw); if(Array.isArray(arr)) msgs = arr; }
+  }catch(e){ msgs = []; }
+  if(!msgs.length){
+    msgs = [{role:'am', kind:'am', ts:Date.now(), text:'你好！我是 AsteriaMind — 一个会自己学习的认知系统。你可以：\n- 告诉我事实：**企鹅是一种鸟类**\n- 问我问题：*咖啡能让人清醒吗？*\n- 让我算数：`2+3×5 等于多少`\n- 叫我搜索：**查一下黑洞**\n\n她会自发学习、质疑和分享，不用你一直喂。'}];
+    save();
+  }
+  msgs.forEach(addMsgEl);
+  scrollBottom(); updateCount();
 }
 
-async function send() {
-    const msg = input.value.trim();
-    if (!msg) return;
-    addMsg(msg, 'user', '💬 你');
-    input.value = '';
-    input.disabled = true;
-    try {
-        const res = await fetch('/api/talk', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text: msg})
-        });
-        const data = await res.json();
-        addMsg(data.reply, data.error ? 'error' : 'am', '🧠 AM' + (data.action ? ' · ' + data.action : ''));
-        if (data.stats) stats.textContent = data.stats;
-    } catch(e) {
-        addMsg('连接失败: ' + e.message, 'error', '⚠ 错误');
-    }
-    input.disabled = false;
-    input.focus();
+/* ── 发送 ── */
+async function send(){
+  const msg = input.value.trim();
+  if(!msg || sending) return;
+  push({role:'user', kind:'user', text:msg, ts:Date.now()});
+  input.value = ''; autoGrow();
+  sending = true; sendBtn.disabled = true;
+  showTyping();
+  const t0 = Date.now();
+  try{
+    const res = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: msg})
+    });
+    const data = await res.json();
+    await new Promise(r=>setTimeout(r, Math.max(0, 500-(Date.now()-t0))));
+    hideTyping();
+    push({role:'am', kind: data.error ? 'error' : 'am', text: data.reply, ts:Date.now()});
+    if(data.stats) statsEl.textContent = data.stats;
+  }catch(e){
+    hideTyping();
+    push({role:'am', kind:'error', text:'连接失败: ' + e.message, ts:Date.now()});
+  }
+  sending = false; sendBtn.disabled = false;
+  input.focus();
+}
+function showTyping(){
+  typingEl = document.createElement('div');
+  typingEl.className = 'msg am typing';
+  typingEl.innerHTML = '<div class="meta"><span class="badge b-am">AM</span></div><div class="dots"><span></span><span></span><span></span></div>';
+  chat.appendChild(typingEl); scrollBottom();
+}
+function hideTyping(){ if(typingEl){ typingEl.remove(); typingEl = null; } }
+function autoGrow(){
+  input.style.height = 'auto';
+  input.style.height = Math.min(120, input.scrollHeight) + 'px';
+}
+function fill(t){ input.value = t; autoGrow(); input.focus(); }
+
+/* ── 备份: 导出 / 导入 / 清空 ── */
+function exportChat(){
+  const blob = new Blob([JSON.stringify(msgs, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'am-chat-' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+}
+document.getElementById('importFile').addEventListener('change', function(){
+  const f = this.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const arr = JSON.parse(r.result);
+      if(!Array.isArray(arr)) throw new Error('不是数组');
+      arr.forEach(m=>{ if(!m || typeof m.text !== 'string' || !m.kind) throw new Error('字段缺失'); });
+      if(arr.length && !confirm('导入将覆盖当前 ' + msgs.length + ' 条记录，确定继续？')) return;
+      msgs = arr; save(); chat.innerHTML = ''; msgs.forEach(addMsgEl); scrollBottom(); updateCount();
+    }catch(e){ alert('备份文件格式不对: ' + e.message); }
+    this.value = '';
+  };
+  r.readAsText(f);
+});
+function askClear(){
+  document.getElementById('modal-desc').textContent = '将删除本地保存的 ' + msgs.length + ' 条消息，此操作不可恢复。建议先导出备份。';
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal(){ document.getElementById('modal').classList.remove('show'); }
+function doClear(){
+  msgs = []; save(); chat.innerHTML = ''; closeModal(); updateCount();
+}
+document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
+
+/* ── 自发发言轮询 (v3.7 保留) ── */
+async function pollUtterances(){
+  try{
+    const res = await fetch('/api/utterances');
+    const data = await res.json();
+    (data.utterances || []).forEach(u=>{
+      const kind = ['learned','conflict','fuzzy'].indexOf(u.kind) >= 0 ? u.kind : 'idle';
+      push({role:'am', kind:kind, text:u.text, ts:Date.now()});
+    });
+  }catch(e){ /* 静默, 下轮再试 */ }
 }
 
-// ★ v3.7: 自发发言轮询 — 她"想说什么就说什么", 不等你问
-async function pollUtterances() {
-    try {
-        const res = await fetch('/api/utterances');
-        const data = await res.json();
-        (data.utterances || []).forEach(u => {
-            const meta = u.kind === 'learned' ? '💭 AM · 分享' :
-                         u.kind === 'conflict' ? '💭 AM · 质疑' :
-                         u.kind === 'fuzzy' ? '💭 AM · 求知' : '💭 AM · 自语';
-            addMsg(u.text, 'am', meta);
-        });
-    } catch(e) { /* 静默, 下轮再试 */ }
-}
+/* ── 事件绑定 ── */
+input.addEventListener('keydown', e=>{
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+input.addEventListener('input', autoGrow);
+
+/* ── 启动 ── */
+initTheme();
+load();
 setInterval(pollUtterances, 10000);
 </script>
 </body>
@@ -306,10 +595,14 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
         """★ v3.6: 知识能量视图 (③) — 星图热力仪表盘"""
         html = """<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8">
-<meta http-equiv="refresh" content="5">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AM 知识能量视图</title>
 <style>
-body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px}
+body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px 24px calc(24px + env(safe-area-inset-bottom))}
+#nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+#nav a{color:#8b949e;text-decoration:none;font-size:13px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:7px 14px;min-height:36px;display:inline-flex;align-items:center;transition:all .15s}
+#nav a:hover{color:#58a6ff;border-color:#58a6ff}
+#nav a.active{color:#58a6ff;background:rgba(88,166,255,.12);font-weight:600}
 h1{font-size:20px;color:#58a6ff;margin:0 0 4px}
 h2{font-size:14px;color:#8b949e;font-weight:400;margin:0 0 20px}
 h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
@@ -320,6 +613,11 @@ h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
 .stat{display:inline-block;margin-right:24px;font-size:13px}
 .stat b{font-size:20px;color:#58a6ff}
 </style></head><body>
+<div id="nav">
+  <a href="/">← 对话</a>
+  <a href="/graph" class="active">能量视图</a>
+  <a href="/galaxy">知识星系</a>
+</div>
 <h1>🧠 AsteriaMind 知识能量视图</h1>
 <h2>能量代谢 — 哪里热(活跃), 哪里冷(冬眠), 哪里新(成长)</h2>
 <div class="card"><h3>🕸️ 实体浏览器 (点实体 → 星形展开 + 数据卡)</h3>
@@ -439,6 +737,10 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;
 #cy{position:fixed;inset:0}
 #info{position:fixed;top:14px;left:16px;z-index:10;font-size:13px;color:#8b949e}
 #info b{color:#58a6ff}
+#navs{position:fixed;top:42px;left:16px;z-index:10;display:flex;gap:6px;flex-wrap:wrap}
+#navs a{color:#8b949e;text-decoration:none;font-size:12px;background:rgba(22,27,34,.85);border:1px solid #30363d;border-radius:7px;padding:5px 10px;min-height:30px;display:inline-flex;align-items:center;transition:all .15s}
+#navs a:hover{color:#58a6ff;border-color:#58a6ff}
+#navs a.active{color:#58a6ff;background:rgba(88,166,255,.12);font-weight:600}
 #tip{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;font-size:12px;color:#484f58;background:rgba(13,17,23,0.8);padding:6px 14px;border-radius:20px;white-space:nowrap}
 #card{position:fixed;right:16px;top:16px;z-index:10;background:rgba(22,27,34,0.94);border:1px solid #30363d;border-radius:10px;padding:14px 18px;min-width:230px;max-width:300px;display:none;font-size:13px;max-height:70vh;overflow-y:auto}
 #card h3{margin:0 0 4px;color:#58a6ff;font-size:15px}
@@ -452,6 +754,11 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;
 #legend .sw{display:inline-block;width:18px;height:3px;border-radius:2px}
 </style></head><body>
 <div id="info">🌌 <b>AM 知识星系</b> (Cytoscape) — 拖动平移 · 滚轮缩放 · 点击恒星看关系</div>
+<div id="navs">
+  <a href="/">← 对话</a>
+  <a href="/graph">能量视图</a>
+  <a href="/galaxy" class="active">知识星系</a>
+</div>
 <div id="tip">大=知识多 · 亮=确定 · 高熵红边 · 虚线=冷边</div>
 <div id="legend">
   <div><span class="sw" style="background:#3fb950"></span>IS_A 分类</div>

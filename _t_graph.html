@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AM 知识能量视图</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px 24px calc(24px + env(safe-area-inset-bottom))}
+#nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+#nav a{color:#8b949e;text-decoration:none;font-size:13px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:7px 14px;min-height:36px;display:inline-flex;align-items:center;transition:all .15s}
+#nav a:hover{color:#58a6ff;border-color:#58a6ff}
+#nav a.active{color:#58a6ff;background:rgba(88,166,255,.12);font-weight:600}
+h1{font-size:20px;color:#58a6ff;margin:0 0 4px}
+h2{font-size:14px;color:#8b949e;font-weight:400;margin:0 0 20px}
+h3{font-size:14px;color:#58a6ff;margin:20px 0 10px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:16px}
+.bar{height:20px;border-radius:4px;margin:4px 0;display:flex;align-items:center;padding:0 8px;font-size:12px;color:#fff;white-space:nowrap;overflow:hidden}
+.tag{display:inline-block;background:#21262d;border:1px solid #30363d;border-radius:4px;padding:2px 8px;margin:3px;font-size:12px}
+.cold{color:#f85149}
+.stat{display:inline-block;margin-right:24px;font-size:13px}
+.stat b{font-size:20px;color:#58a6ff}
+</style></head><body>
+<div id="nav">
+  <a href="/">← 对话</a>
+  <a href="/graph" class="active">能量视图</a>
+  <a href="/galaxy">知识星系</a>
+</div>
+<h1>🧠 AsteriaMind 知识能量视图</h1>
+<h2>能量代谢 — 哪里热(活跃), 哪里冷(冬眠), 哪里新(成长)</h2>
+<div class="card"><h3>🕸️ 实体浏览器 (点实体 → 星形展开 + 数据卡)</h3>
+<div style="margin-bottom:8px"><input id="entInput" placeholder="输入实体名, 如 企鹅/蛇/鸟类" style="background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 10px;width:220px">
+<button onclick="exploreEntity()" style="background:#238636;border:none;color:#fff;border-radius:6px;padding:6px 14px;cursor:pointer">展开</button></div>
+<div id="starMap" style="min-height:180px;position:relative"></div></div>
+<div class="card"><div id="stats"></div></div>
+<div class="card"><h3>🧊 冷边 (能量低, 需关注)</h3><div id="cold"></div></div>
+<div class="card"><h3>🌱 新鲜边 (近24h 成长)</h3><div id="fresh"></div></div>
+<div class="card"><h3>📊 关系分布</h3><div id="rel"></div></div>
+<div class="card"><h3>🌫️ 熵云 (知识模糊区 — 越虚越不确定)</h3><div id="entropy"></div></div>
+<div class="card"><h3>🕰️ 知识生长时间线 (她怎么长起来的)</h3><div id="timeline"></div></div>
+<div class="card"><h3>🔗 最近回答的证据链 (她凭什么这么说)</h3><div id="evidence"></div></div>
+<script>
+async function load(){
+  try{
+    const r = await fetch('/api/graph');
+    const d = await r.json();
+    const s = d.stats;
+    document.getElementById('stats').innerHTML =
+      '<span class="stat">总边 <b>'+s.total_edges.toLocaleString()+'</b></span>'+
+      '<span class="stat">命名边 <b>'+s.named_edges+'</b></span>'+
+      '<span class="stat">冷边 <b class="'+(s.cold_count>0?'cold':'')+'">'+s.cold_count+'</b></span>';
+    // maxE 仅供后续扩展用, 当前没有 hot 数据所以不需要
+    document.getElementById('cold').innerHTML = d.cold.length ? d.cold.map(x=>
+      '<span class="tag cold">'+x.source+' ['+x.relation+'] '+x.target+' E'+x.energy+'</span>').join('')
+      : '<span style="color:#3fb950">✅ 无冷边 — 知识能量健康</span>';
+    document.getElementById('fresh').innerHTML = d.fresh.length ? d.fresh.map(x=>
+      '<span class="tag">'+x.source+' ['+x.relation+'] '+x.target+'</span>').join('')
+      : '<span style="color:#8b949e">近24h 无新增</span>';
+    // 删除 hot/assoc 渲染 (暂未启用以避免 GROUP BY 慢查询)
+    document.getElementById('rel').innerHTML = d.relation_dist.map(x=>
+      '<span class="tag">'+x.relation+' ×'+x.count+'</span>').join('');
+    document.getElementById('entropy').innerHTML = (d.entropy_cloud||[]).length ? d.entropy_cloud.map(x=>{
+      const blur = Math.min(3, Math.round((x.entropy-0.5)*6));  // 熵越高越模糊
+      const red = Math.min(255, Math.round((x.entropy-0.5)*400));
+      return '<span class="tag" style="color:rgb('+red+',80,80);filter:blur('+blur+'px)">'
+        +x.entity+' H'+x.entropy+'</span>';
+    }).join('') : '<span style="color:#3fb950">✅ 无高熵实体 — 知识清晰</span>';
+    document.getElementById('timeline').innerHTML = (d.timeline||[]).length ? d.timeline.map(x=>
+      '<div style="margin:2px 0;font-size:12px"><span style="color:#8b949e;display:inline-block;width:90px">'+x.time+'</span>'
+      +'<span style="color:#58a6ff">'+x.subject+'</span> <span style="color:#d29922">['+x.relation+']</span> '
+      +'<span>'+x.target+'</span> <span style="color:#8b949e">('+x.feedback+')</span></div>').join('')
+      : '<span style="color:#8b949e">暂无记录</span>';
+  }catch(e){ document.getElementById('stats').innerHTML='<span style="color:#f85149">加载失败: '+e+'</span>'; }
+}
+async function loadEvidence(){
+  try{
+    const r = await fetch('/api/evidence');
+    const d = await r.json();
+    if(!d.edges || !d.edges.length){ document.getElementById('evidence').innerHTML='<span style="color:#8b949e">还没回答过问题 — 去聊两句, 这里会显示她走了哪些边</span>'; return; }
+    let html = '<div style="margin-bottom:8px">问: <b>'+d.question+'</b> &nbsp; 策略: '+d.strategy+' &nbsp; 意图: '+d.intent;
+    if(d.uncertain) html += ' &nbsp; <span class="cold">⚠ 不确定 ('+d.uncertain.entropy.toFixed(2)+')</span>';
+    html += '</div>';
+    html += d.edges.map((e,i)=>{
+      const w = 30 + Math.min(60, e.salience*40);
+      return '<div style="margin:3px 0;padding:6px 10px;background:#21262d;border-radius:6px;border-left:3px solid '+(d.uncertain?'#f85149':'#3fb950')+';width:'+w+'%">'
+        + '<span style="color:#58a6ff">'+d.subject+'</span> '
+        + '<span style="color:#d29922">['+e.relation+']</span> '
+        + '<span style="color:#e6edf3">'+e.target+'</span> '
+        + '<span style="color:#8b949e;font-size:11px">E'+e.energy+'</span></div>';
+    }).join('');
+    document.getElementById('evidence').innerHTML = html;
+  }catch(e){ document.getElementById('evidence').innerHTML='<span style="color:#f85149">证据链加载失败</span>'; }
+}
+load(); setInterval(load, 10000);
+loadEvidence(); setInterval(loadEvidence, 10000);
+async function exploreEntity(){
+  const ent = document.getElementById('entInput').value.trim();
+  if(!ent) return;
+  try{
+    const r = await fetch('/api/entity/'+encodeURIComponent(ent));
+    const d = await r.json();
+    const box = document.getElementById('starMap');
+    const cx = 300, cy = 110;
+    let html = '<div style="text-align:center;margin-bottom:6px"><span style="color:#58a6ff;font-size:16px;font-weight:500">'+d.entity+'</span>'
+      +' <span style="color:#8b949e">熵 H'+d.entropy+'</span></div>';
+    const rels = d.out_edges||[];
+    rels.forEach((e,i)=>{
+      const ang = (2*Math.PI*i)/Math.max(rels.length,1) - Math.PI/2;
+      const x = cx + 130*Math.cos(ang), y = cy + 80*Math.sin(ang);
+      const color = e.relation.indexOf('NOT')>=0 ? '#f85149' : '#3fb950';
+      html += '<svg style="position:absolute;left:0;top:0;width:100%;height:100%" viewBox="0 0 600 220">'
+        +'<line x1="'+cx+'" y1="'+cy+'" x2="'+x+'" y2="'+y+'" stroke="'+color+'" stroke-width="1.5" stroke-dasharray="'+(e.energy<0.5?'4 3':'none')+'"/>'
+        +'<text x="'+(cx+x)/2+'" y="'+(cy+y)/2-4+'" fill="#d29922" font-size="11" text-anchor="middle">['+e.relation+']</text>'
+        +'<circle cx="'+cx+'" cy="'+cy+'" r="18" fill="#1f6feb" stroke="#58a6ff" stroke-width="1"/>'
+        +'<circle cx="'+x+'" cy="'+y+'" r="12" fill="#21262d" stroke="'+color+'" stroke-width="1" cursor="pointer" data-ent="'+e.target+'" onclick="exploreNode(this)"/>'
+        +'<text x="'+x+'" y="'+y+'" fill="#e6edf3" font-size="10" text-anchor="middle" dominant-baseline="central">'+e.target+'</text>'
+        +'</svg>';
+    });
+    if(rels.length) html += '<div style="position:absolute;left:0;top:180px;font-size:11px;color:#8b949e">点击外圈实体可继续展开 — 虚线=低能量边</div>';
+    if(!rels.length) html += '<div style="color:#8b949e;text-align:center;padding:30px">「'+d.entity+'」还没有命名知识边 — 教教她吧</div>';
+    box.innerHTML = html;
+  }catch(e){ document.getElementById('starMap').innerHTML='<span style="color:#f85149">展开失败: '+e+'</span>'; }
+}
+function exploreNode(el){ document.getElementById('entInput').value = el.getAttribute('data-ent'); exploreEntity(); }
+</script></body></html>

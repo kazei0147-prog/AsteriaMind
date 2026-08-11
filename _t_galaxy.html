@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>AM 知识星系</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+body{margin:0;background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;overflow:hidden}
+#cy{position:fixed;inset:0}
+#info{position:fixed;top:14px;left:16px;z-index:10;font-size:13px;color:#8b949e}
+#info b{color:#58a6ff}
+#navs{position:fixed;top:42px;left:16px;z-index:10;display:flex;gap:6px;flex-wrap:wrap}
+#navs a{color:#8b949e;text-decoration:none;font-size:12px;background:rgba(22,27,34,.85);border:1px solid #30363d;border-radius:7px;padding:5px 10px;min-height:30px;display:inline-flex;align-items:center;transition:all .15s}
+#navs a:hover{color:#58a6ff;border-color:#58a6ff}
+#navs a.active{color:#58a6ff;background:rgba(88,166,255,.12);font-weight:600}
+#tip{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;font-size:12px;color:#484f58;background:rgba(13,17,23,0.8);padding:6px 14px;border-radius:20px;white-space:nowrap}
+#card{position:fixed;right:16px;top:16px;z-index:10;background:rgba(22,27,34,0.94);border:1px solid #30363d;border-radius:10px;padding:14px 18px;min-width:230px;max-width:300px;display:none;font-size:13px;max-height:70vh;overflow-y:auto}
+#card h3{margin:0 0 4px;color:#58a6ff;font-size:15px}
+#card .meta{color:#8b949e;font-size:11px;margin-bottom:8px}
+#card .entropy{color:#f0883e;font-size:12px;margin-bottom:8px}
+#card .rel{margin:3px 0;color:#e6edf3;font-size:12px}
+#card .rel .r{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:6px;vertical-align:-2px}
+#card .rel .e{color:#8b949e;font-size:10px;margin-left:4px}
+#legend{position:fixed;left:16px;bottom:16px;z-index:10;font-size:11px;color:#8b949e;background:rgba(13,17,23,0.8);padding:8px 12px;border-radius:8px}
+#legend div{margin:2px 0;display:flex;align-items:center;gap:6px}
+#legend .sw{display:inline-block;width:18px;height:3px;border-radius:2px}
+</style></head><body>
+<div id="info">🌌 <b>AM 知识星系</b> (Cytoscape) — 拖动平移 · 滚轮缩放 · 点击恒星看关系</div>
+<div id="navs">
+  <a href="/">← 对话</a>
+  <a href="/graph">能量视图</a>
+  <a href="/galaxy" class="active">知识星系</a>
+</div>
+<div id="tip">大=知识多 · 亮=确定 · 高熵红边 · 虚线=冷边</div>
+<div id="legend">
+  <div><span class="sw" style="background:#3fb950"></span>IS_A 分类</div>
+  <div><span class="sw" style="background:#58a6ff"></span>CAN 能力</div>
+  <div><span class="sw" style="background:#f85149"></span>NOT_CAN 否定</div>
+  <div><span class="sw" style="background:#d29922"></span>HAS 属性</div>
+  <div><span class="sw" style="background:#a371f7"></span>EATS 捕食</div>
+  <div><span class="sw" style="background:#f0883e"></span>LIVES_IN 栖息</div>
+  <div><span class="sw" style="background:#39c5cf"></span>ORBITS 环绕</div>
+  <div><span class="sw" style="border-top:2px dashed #484f58"></span>虚线 = 低能量(冷边)</div>
+</div>
+<div id="card"></div>
+<div id="cy"></div>
+<script>
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  style: [
+    {selector:'node', style:{
+      'background-color':'data(color)','width':'data(size)','height':'data(size)',
+      'label':'data(label)','font-size':11,'color':'#e6edf3','text-valign':'bottom',
+      'text-margin-y':6,'border-width':1,'border-color':'rgba(255,255,255,0.3)'
+    }},
+    {selector:'node.hot', style:{'border-width':3,'border-color':'#f0883e'}},
+    {selector:'node.hub', style:{'border-width':3,'border-color':'#d4af37'}},
+    {selector:'edge', style:{
+      'width':1.5,'line-color':'data(color)','target-arrow-shape':'triangle',
+      'target-arrow-color':'data(color)','curve-style':'bezier',
+      'label':'data(label)','font-size':8,'color':'#8b949e','text-rotation':'autorotate'
+    }},
+    {selector:'edge.cold', style:{'line-style':'dashed','opacity':0.55}}
+  ],
+  layout:{name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}
+});
+const relColor = {
+  'IS_A':'#3fb950','CAN':'#58a6ff','NOT_CAN':'#f85149','HAS':'#d29922',
+  'EATS':'#a371f7','LIVES_IN':'#f0883e','ORBITS':'#39c5cf'
+};
+async function loadGalaxy(){
+  try{
+    const gal = await (await fetch('/api/galaxy')).json();
+    const gl = gal.nodes || gal;   // 兼容 {nodes, edges} 新格式
+    const edges = gal.edges || [];
+    const maxE = Math.max(...gl.map(g=>g.energy));
+    const cloud = (await (await fetch('/api/graph')).json()).entropy_cloud || [];
+    const hotEnts = new Set(cloud.map(c=>c.entity));
+    const nodes = gl.map(g=>{
+      // 中枢节点 (分类词): 金色 + 按入度放大 (自动涌现的分类枢纽)
+      const hub = g.is_hub;
+      const weight = g.edges + (g.in_degree||0)*2;
+      return {
+        data:{id:g.entity, label:g.entity,
+              size:Math.max(20, Math.min(80, 18+30*weight/(maxE*2+2))),
+              color: hub ? '#d4af37' : (hotEnts.has(g.entity) ? '#f0883e' : '#58a6ff')},
+        classes: (hub?'hub ':'')+(hotEnts.has(g.entity)?'hot':'')
+      };
+    });
+    cy.add(nodes);
+    // ★ 全量连线: 节点间所有命名边一次性加入 → 群星漂浮 + 线连接
+    edges.forEach(e=>{
+      const eid = e.source+'__'+e.relation+'__'+e.target;
+      if(!cy.getElementById(eid).length){
+        cy.add({data:{id:eid, source:e.source, target:e.target, label:e.relation,
+                      color: relColor[e.relation]||'#888'}});
+      }
+    });
+    cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000,
+               animate:true, animationDuration:1500}).run();
+  }catch(e){ console.error('加载失败:', e); }
+}
+async function addEntityEdges(name){
+  if(cy.getElementById(name).hasClass('expanded')) return;
+  try{
+    const d = await (await fetch('/api/entity/'+encodeURIComponent(name))).json();
+    const exists = n => cy.getElementById(n).length > 0;
+    // 先加邻居节点
+    (d.out_edges||[]).forEach(e=>{ if(!exists(e.target)) cy.add({data:{id:e.target,label:e.target,size:14,color:'#888'}}); });
+    // 加边
+    (d.out_edges||[]).forEach(e=>{
+      const eid = name+'__'+e.relation+'__'+e.target;
+      if(!cy.getElementById(eid).length){
+        cy.add({data:{id:eid, source:name, target:e.target, label:e.relation,
+                      color: relColor[e.relation]||'#888'},
+                classes: e.energy<0.5 ? 'cold' : ''});
+      }
+    });
+    cy.getElementById(name).addClass('expanded');
+    cy.layout({name:'cose', padding:60, idealEdgeLength:90, nodeRepulsion:9000}).run();
+  }catch(e){ console.error('实体展开失败:', e); }
+}
+cy.on('tap','node', evt=>{
+  const n = evt.target;
+  showCard(n.id());
+  addEntityEdges(n.id());
+});
+cy.on('tap', evt=>{ if(evt.target === cy){ document.getElementById('card').style.display='none'; } });
+async function showCard(name){
+  try{
+    const d = await (await fetch('/api/entity/'+encodeURIComponent(name))).json();
+    const card = document.getElementById('card');
+    let html = '<h3>'+d.entity+'</h3>';
+    html += '<div class="meta">出边 '+ (d.out_edges||[]).length +' · 入边 '+ (d.in_edges||[]).length +'</div>';
+    if(d.entropy > 0.5) html += '<div class="entropy">⚠ 熵 H'+d.entropy+' — 知识模糊</div>';
+    (d.out_edges||[]).slice(0,12).forEach(e=>{
+      html += '<div class="rel"><span class="r" style="background:'+(relColor[e.relation]||'#888')+'"></span>'
+        +'['+e.relation+'] '+e.target+'<span class="e">E'+e.energy+(e.energy<0.5?' ⚠':'')+'</span></div>';
+    });
+    if(!(d.out_edges||[]).length) html += '<div style="color:#8b949e">还没有命名知识边</div>';
+    html += '<div style="margin-top:10px;border-top:1px solid #30363d;padding-top:8px;font-size:11px;color:#8b949e">🧠 语义邻居 (向量黑盒联想)</div>';
+    try{
+      const v = await (await fetch('/api/vector/'+encodeURIComponent(name))).json();
+      if(v.neighbors && v.neighbors.length){
+        html += v.neighbors.slice(0,6).map(x=>'<span class="tag">'+x.word+'<small> '+x.sim.toFixed(2)+'</small></span>').join('');
+      } else {
+        html += '<div style="color:#8b949e">词表无此词 — 喂语料后会长出来</div>';
+      }
+    }catch(e){ html += '<div style="color:#8b949e">向量服务未启动</div>'; }
+    card.innerHTML = html; card.style.display = 'block';
+  }catch(e){ console.error(e); }
+}
+loadGalaxy();
+</script></body></html>
