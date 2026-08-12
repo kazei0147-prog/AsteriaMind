@@ -1,5 +1,5 @@
 """
-SpontaneousSpeaker — 自发发言器 (AsteriaMind v3.7)
+SpontaneousSpeaker — 自发发言器 (AsteriaMind v3.7 / F15 v3.9)
 
 她"想说什么就说什么": 从内部状态收集值得说的话,
   不等用户输入, 主动把想法说出口。
@@ -13,6 +13,10 @@ SpontaneousSpeaker — 自发发言器 (AsteriaMind v3.7)
   2. 发现的矛盾   (CAN↔NOT_CAN 并存)               — 质疑欲
   3. 高熵实体     (知识模糊, 想搞懂)                — 求知欲
   4. 概念缺口     (词表有语义位置, 星图不认识)      — 探索欲
+  5. 预测         (ActiveInference 在线规划, F15)   — 预知欲
+     ★ v3.9 F15 (U-03 方案 B): 预测 = 对未来的自发发言 —
+       从 plan_actions() 选高性价比行动, 转成"我预感X可能Y"
+       预测是认知体区别于问答机器的关键能力
 
 克制参数: 不刷屏, 有节流, 有队列上限 — 有想法的前提是有分寸
 """
@@ -62,10 +66,12 @@ def _is_valid_trace_pair(s: str, o: str) -> bool:
 
 
 class SpontaneousSpeaker:
-    def __init__(self, star_map, critic=None, concept=None):
+    def __init__(self, star_map, critic=None, concept=None, active_inference=None):
         self.star_map = star_map
         self.critic = critic
         self.concept = concept
+        # ★ F15 (v3.9): ActiveInference 预测引擎 — 预测=对未来的自发发言
+        self.active_inference = active_inference
         # ★ 独立只读连接: 不共享 star_map.conn (后台线程在它上面写会卡死同连接读)
         import sqlite3 as _sq
         try:
@@ -199,6 +205,38 @@ class SpontaneousSpeaker:
             except Exception:
                 pass
 
+        # 5. 预测 (预知欲 — F15 v3.9: ActiveInference 增强)
+        #    预测 = 对未来的自发发言: 从 plan_actions() 选高性价比行动,
+        #    转成"我预感 X 可能 Y" — 认知体区别于问答机器的关键能力
+        #    质量门: 只放行有知识锚点的预测 (evidence_count>=1), 不吐英文/残片
+        if self.active_inference:
+            try:
+                plans = self.active_inference.plan_actions(top_k=6)
+                for p in plans:
+                    s, o = (p.get("subj") or ""), (p.get("obj") or "")
+                    if not s or not o:
+                        continue
+                    if not _is_valid_trace_pair(s, o):
+                        continue
+                    # 预测门槛: 要有知识锚点 (至少 1 条证据) 才值得预测
+                    if p.get("evidence_count", 0) < 1:
+                        continue
+                    if p.get("action_type") in ("observe",):
+                        continue  # 静默观察不值得说出口
+                    key = f"predict_{s}_{p.get('pred','')}_{o}"
+                    if key in self._said_ids:
+                        continue
+                    thoughts.append({
+                        "priority": 6, "kind": "predict",
+                        "trace_id": key, "source": s,
+                        "relation": p.get("pred") or "IS_A", "target": o,
+                        "action_type": p.get("action_type", "suggest"),
+                        "belief": p.get("belief", 0.0),
+                        "uncertainty": p.get("uncertainty", 1.0),
+                    })
+            except Exception:
+                pass
+
         thoughts.sort(key=lambda x: -x["priority"])
         return thoughts[:limit]
 
@@ -228,6 +266,31 @@ class SpontaneousSpeaker:
                 return (f"我注意到「{thought['source']}」这个词我好像听说过"
                         f"（有点像「{thought['similar_to']}」），"
                         f"但我还不认识它。", "gap")
+            if kind == "predict":
+                # F15: 预测=对未来的自发发言 — 按行动类型给不同的预测语气
+                rel = thought.get("relation") or "IS_A"
+                rel_word = {"IS_A": "属于", "CAN": "能", "NOT_CAN": "不能",
+                            "HAS": "有", "EATS": "吃", "LIVES_IN": "生活在",
+                            "NOT_IS_A": "不属于", "ORBITS": "围绕"}.get(rel, rel)
+                at = thought.get("action_type", "suggest")
+                if at == "explore":
+                    return (f"我预感「{thought['source']}」可能和"
+                            f"「{thought['target']}」有关系，"
+                            f"（{rel_word}）——这只是我的推测，"
+                            f"我还没验证过。", "predict")
+                if at == "verify":
+                    return (f"我有点预感：「{thought['source']}」"
+                            f"{rel_word}「{thought['target']}」——"
+                            f"但我还没十足把握，想找机会确认一下。", "predict")
+                # suggest / clarify 等: 高置信预测
+                conf = thought.get("belief", 0.0)
+                if conf >= 0.6:
+                    return (f"我预感「{thought['source']}」"
+                            f"{rel_word}「{thought['target']}」——"
+                            f"这是我的猜测，不过我会继续观察验证。", "predict")
+                return (f"我在想「{thought['source']}」会不会"
+                        f"{rel_word}「{thought['target']}」？"
+                        f"这是我的一个猜想。", "predict")
         except Exception:
             pass
         return ("", kind)

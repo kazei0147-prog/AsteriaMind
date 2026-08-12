@@ -722,11 +722,13 @@ class CognitiveInterface:
         )
 
         # ★ v3.7: 自发发言器 — 想说什么就说什么 (输出=f(内部状态))
+        # ★ F15 (v3.9): 注入 active_inference — 预测=对未来的自发发言 (U-03 方案 B)
         from AsteriaMind.spontaneous_speaker import SpontaneousSpeaker
         self.speaker = SpontaneousSpeaker(
             star_map=self.cognitive_star_map,
             critic=self.critic,
             concept=self.concept,
+            active_inference=self.mother.active_inference,
         )
 
         # ★ v3.8: 推理链 — 传递推理 (企鹅→鸟类→脊椎动物)

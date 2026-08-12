@@ -342,6 +342,16 @@ class LanguageGenerator:
                         "EATS": 3, "LIVES_IN": 3, "ORBITS": 3},
             "CONFIRM": {"IS_A": 0, "HAS": 1,
                         "NOT_CAN": 2, "CAN": 2, "EATS": 3, "LIVES_IN": 3},
+            # ── F14: 复杂意图 (v3.9) ──
+            "COMPARE": {"IS_A": 3, "NOT_IS_A": 3,
+                        "NOT_CAN": 0, "CAN": 0, "HAS": 0,
+                        "EATS": 1, "LIVES_IN": 1, "ORBITS": 1},
+            "HYPOTHESIS": {"IS_A": 0, "CAN": 0, "HAS": 1,
+                           "NOT_CAN": 1, "NOT_IS_A": 1,
+                           "EATS": 2, "LIVES_IN": 2, "ORBITS": 2},
+            "COUNTERFACTUAL": {"NOT_CAN": 0, "NOT_IS_A": 0,
+                               "CAN": 1, "IS_A": 2, "HAS": 2,
+                               "EATS": 3, "LIVES_IN": 3, "ORBITS": 3},
         }
         order = INTENT_ORDER.get(intent, {"NOT_CAN": 0, "NOT_IS_A": 0, "IS_A": 1,
                                            "CAN": 2, "EATS": 3, "HAS": 4,
