@@ -35,7 +35,7 @@ class CriticModule:
         """计算实体的预测熵 H(X)"""
         rows = self.star_map.conn.execute(
             "SELECT relation, COUNT(*) FROM directed_edges "
-            "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+            "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','CAUSES') "
             "GROUP BY relation", (entity,)).fetchall()
         if not rows:
             return 1.0  # 无知识 = 最大熵

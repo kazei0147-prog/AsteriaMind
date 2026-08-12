@@ -32,6 +32,9 @@ class BeliefEdge:
     total_evidence: int = 0
     prediction_errors: list[float] = field(default_factory=list)  # 历史预测误差
     last_update: float = 0.0
+    # ★ v3.9 F17 (瓶颈三): 该边是否曾被 F15 预测想法源"预测过"
+    #   预测被后续 confirmed 验证 → 挣回能量 (内在奖励, 可证伪)
+    predicted: bool = False
 
     @property
     def mean(self) -> float:
@@ -146,6 +149,15 @@ class ActiveInferenceEngine:
         edge.prediction_errors.append(error)
         # 贝叶斯更新
         edge.update(confirmed)
+        # ★ v3.9 F17 (瓶颈三): 预测被验证 → 内在挣回能量
+        #   该边曾被 F15 预测想法源"预测过" + 本次确认 → 挣回 (预测兑现)
+        #   设计原则 (可证伪): 预测可被未来证据推翻, 不是自我表扬
+        if confirmed and edge.predicted and self.star_map:
+            try:
+                self.star_map.restore_energy(subj, obj, 0.08)
+            except Exception:
+                pass
+            edge.predicted = False  # 一次预测兑现一次奖励
         # 同步写入星图
         if self.star_map:
             self.star_map.store(

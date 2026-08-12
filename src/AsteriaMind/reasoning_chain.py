@@ -25,8 +25,33 @@ _NAMED = "('IS_A','NOT_IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN')"
 
 
 class ReasoningChain:
+    # ★ v3.9 F17 (瓶颈三): 推理链自洽 → 挣回能量 (内在奖励, 可被未来推翻)
+    _REWARD_HOPS2 = 0.05   # 两跳链成功 → 路径边挣回 (可证伪: 未来 NOT_IS_A 可推翻)
+    _REWARD_HOPS1 = 0.02   # 一跳链较弱 (太常见, 奖励少)
+
     def __init__(self, star_map):
         self.star_map = star_map
+
+    def _reward_chain(self, results: list[dict]) -> None:
+        """内在奖励: 推理链自洽度 → 挣回路径边的能量
+        设计原则 (可证伪性): 链本身可被未来新边推翻, 不是自我表扬
+        """
+        if not results or not self.star_map:
+            return
+        try:
+            for r in results:
+                path = r.get("path", [])
+                if len(path) >= 3:
+                    amount = self._REWARD_HOPS2
+                elif len(path) == 2:
+                    amount = self._REWARD_HOPS1
+                else:
+                    continue
+                # 对链上每条边挣回 (subj IS_A tgt)
+                for i in range(len(path) - 1):
+                    self.star_map.restore_energy(path[i], path[i + 1], amount)
+        except Exception:
+            pass  # 奖励失败不阻断推理
 
     def infer(self, subject: str, max_hops: int = 2,
               top_k: int = 4) -> list[dict]:
@@ -86,7 +111,10 @@ class ReasoningChain:
                     })
 
         results.sort(key=lambda x: -x["confidence"])
-        return results[:top_k]
+        results = results[:top_k]
+        # ★ v3.9 F17 (瓶颈三): 推理链自洽 → 内在挣回
+        self._reward_chain(results)
+        return results
 
     def chain_text(self, r: dict) -> str:
         """推理链转描述: 企鹅 → 鸟类 → 脊椎动物"""

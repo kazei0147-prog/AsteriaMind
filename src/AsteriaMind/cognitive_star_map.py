@@ -153,8 +153,10 @@ def _incr_directed(cur, source: str, target: str, relation: str = "",
     if not source or not target or source == target:
         return
     # 命名关系 (IS_A/CAN/HAS/...) 才需要质量门, co_text 不需要
+    # ★ v3.9 F16: 加入 CAUSES/NOT_CAUSES/OPPOSITE 元关系 (瓶颈一: 常识骨架)
     NAMED = {"IS_A", "NOT_IS_A", "CAN", "NOT_CAN", "HAS", "NOT_HAS",
-             "EATS", "NOT_EATS", "LIVES_IN", "ORBITS"}
+             "EATS", "NOT_EATS", "LIVES_IN", "ORBITS", "CAUSES", "NOT_CAUSES",
+             "OPPOSITE"}
     if relation in NAMED:
         if not _is_valid_entity_pair(source, target):
             return  # 拒绝垃圾三元组
@@ -442,7 +444,10 @@ class CognitiveStarMap:
             """)
             for seed in (("IS_A","NOT_CAN","虽然属于，但"), ("IS_A","CAN","属于，且"),
                          ("NOT_CAN","CAN","虽然不会，但"), ("HAS","CAN","且"),
-                         ("IS_A","ORBITS","属于，"), ("HAS","IS_A","也属于")):
+                         ("IS_A","ORBITS","属于，"), ("HAS","IS_A","也属于"),
+                         # ★ v3.9 F16: 因果连接词 (瓶颈一: 常识骨架)
+                         ("CAUSES","IS_A","因为，所以"), ("CAUSES","HAS","导致，因而"),
+                         ("CAUSES","CAUSES","于是，进而"), ("NOT_CAN","CAUSES","正因不会，所以")):
                 c.execute("INSERT OR IGNORE INTO relation_connectors(rel_a,rel_b,connector,count) VALUES(?,?,?,1)", seed)
         self.conn.commit()
 
@@ -698,10 +703,11 @@ class CognitiveStarMap:
         query_words = set(re.findall(r'[\u4e00-\u9fff]{1,4}', query))
         query_words.discard('吗'); query_words.discard('呢'); query_words.discard('什么')
 
-        # 关系类型优先级: 否定/例外 > 能力 > 分类 > 特征
+        # 关系类型优先级: 否定/例外 > 能力 > 因果 > 分类 > 特征
+        # ★ v3.9 F16: 加入 CAUSES 因果 (瓶颈一: 常识骨架 — 因果高于分类)
         relation_priority = {
-            "NOT_CAN": 1.5, "NOT_IS_A": 1.5,
-            "CAN": 1.2, "HAS": 1.0, "ORBITS": 1.0,
+            "NOT_CAN": 1.5, "NOT_IS_A": 1.5, "NOT_CAUSES": 1.5,
+            "CAUSES": 1.3, "CAN": 1.2, "HAS": 1.0, "ORBITS": 1.0,
             "IS_A": 0.7, "co_text": 0.3,
         }
 
@@ -713,9 +719,11 @@ class CognitiveStarMap:
             target, rel, weight, conf, edge_energy = row
 
             # ★ v3.6: 空间过滤 (合并后单图, 全看得到)
+            # ★ v3.9 F16: belief 空间加入 CAUSES/NOT_CAUSES/OPPOSITE (瓶颈一: 元逻辑骨架)
             NAMED_RELATIONS = {
                 "NOT_CAN", "NOT_IS_A", "IS_A", "CAN",
                 "HAS", "EATS", "LIVES_IN", "ORBITS",
+                "CAUSES", "NOT_CAUSES", "OPPOSITE",
             }
             if space == "belief" and rel not in NAMED_RELATIONS:
                 continue

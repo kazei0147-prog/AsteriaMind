@@ -18,8 +18,10 @@ from AsteriaMind.cognitive_star_map import _is_valid_entity_pair
 # 问句标记: "鸟类有乳腺吗" → 不是教学
 _QUESTION_RE = re.compile(r"[吗么呢]$|^(?:是不是|会不会|能不能|有没有|是否|请问|你知道|你知道)")
 # 关系反对映射 (冲突检查用)
+# ★ v3.9 F16: 加入 CAUSES↔NOT_CAUSES (瓶颈一: 因果元逻辑 — 防因果边自相矛盾)
 _OPPOSITE = {"IS_A": "NOT_IS_A", "CAN": "NOT_CAN", "NOT_CAN": "CAN",
-             "HAS": "NOT_HAS", "EATS": "NOT_EATS"}
+             "HAS": "NOT_HAS", "EATS": "NOT_EATS", "CAUSES": "NOT_CAUSES",
+             "NOT_CAUSES": "CAUSES"}
 
 
 class IntakePurifier:

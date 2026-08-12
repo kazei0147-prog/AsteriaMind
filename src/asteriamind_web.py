@@ -839,7 +839,7 @@ a{color:#8b949e;text-decoration:none}
 <script src="/vendor/OrbitControls.js"></script>
 <script src="/vendor/CSS2DRenderer.js"></script>
 <script>
-const relColor = {'IS_A':'#3fb950','CAN':'#58a6ff','NOT_CAN':'#f85149','HAS':'#d29922','EATS':'#a371f7','LIVES_IN':'#f0883e','ORBITS':'#39c5cf'};
+const relColor = {'IS_A':'#3fb950','CAN':'#58a6ff','NOT_CAN':'#f85149','HAS':'#d29922','EATS':'#a371f7','LIVES_IN':'#f0883e','ORBITS':'#39c5cf','CAUSES':'#e34b4b'};
 const container = document.getElementById('scene-container');
 const tooltipEl = document.getElementById('tooltip');
 const searchEl = document.getElementById('search');
@@ -1293,6 +1293,13 @@ load();
                 _REPLAY.ingest(text)
             except Exception:
                 pass
+            # ★ v3.9 F18 (瓶颈二): 句间衔接统计 — 用上一轮用户话 + 本轮构成轮次对
+            try:
+                if "last_user_text" in session and session["last_user_text"]:
+                    _REPLAY.learn_transition(session["last_user_text"], text)
+            except Exception:
+                pass
+            session["last_user_text"] = text
             recent = CONV_MEMORY.get_recent(sid, n=4)
             short_mem = "\n".join(f"[{r['role']}]: {r['content'][:120]}" for r in recent)
             # 长记忆上下文
@@ -1383,20 +1390,20 @@ load();
         cold = conn.execute(
             "SELECT source, relation, target, ROUND(COALESCE(energy,0),2) as e "
             "FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES') "
             "AND COALESCE(energy,1.0) < 0.4 "
             "ORDER BY e ASC LIMIT 10").fetchall()
 
         # 新鲜边: 命名边按 last_update DESC 走主键索引
         fresh = conn.execute(
             "SELECT source, relation, target FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES') "
             "ORDER BY last_update DESC LIMIT 10").fetchall()
 
         # 关系分布
         rel_dist = conn.execute(
             "SELECT relation, COUNT(*) FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES','EATS','LIVES_IN','NOT_IS_A') "
             "GROUP BY relation").fetchall()
         named_edges = sum(n for _, n in rel_dist)
         total_edges = conn.execute(
@@ -1409,11 +1416,11 @@ load();
         import math
         entities = api_conn.execute(
             "SELECT DISTINCT source FROM directed_edges "
-            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS') LIMIT 200").fetchall()
+            "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES') LIMIT 200").fetchall()
         for (e,) in entities:
             rels = api_conn.execute(
                 "SELECT relation, COUNT(*) FROM directed_edges "
-                "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+                "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES','EATS','LIVES_IN') "
                 "GROUP BY relation", (e,)).fetchall()
             if not rels:
                 continue
@@ -1495,7 +1502,7 @@ load();
         api_conn = sqlite3_mod.connect('D:/AM/HiveMind_repo/src/asteriamind.db')
         api_conn.execute('PRAGMA busy_timeout = 5000')
 
-        NAMED = "('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A')"
+        NAMED = "('IS_A','CAN','NOT_CAN','HAS','CAUSES','EATS','LIVES_IN','NOT_IS_A')"
 
         # 预筛命名边 rowid → temp 表 (部分索引 313 行, 避免 700 万全扫)
         api_conn.execute(
@@ -1586,13 +1593,13 @@ load();
         out_edges = api_conn.execute(
             "SELECT relation, target, ROUND(COALESCE(energy,0),2), weight "
             "FROM directed_edges WHERE source=? "
-            "AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "AND relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES','EATS','LIVES_IN','NOT_IS_A') "
             "ORDER BY weight DESC LIMIT 15", (ent,)).fetchall()
         # 2. 入边 (谁指向它)
         in_edges = api_conn.execute(
             "SELECT source, relation, ROUND(COALESCE(energy,0),2) "
             "FROM directed_edges WHERE target=? "
-            "AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN','NOT_IS_A') "
+            "AND relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES','EATS','LIVES_IN','NOT_IS_A') "
             "ORDER BY weight DESC LIMIT 10", (ent,)).fetchall()
         # 3. co_text 联想 (黑盒邻居)
         assoc = api_conn.execute(
@@ -1602,7 +1609,7 @@ load();
         # 4. 熵 (知识模糊度)
         rels = api_conn.execute(
             "SELECT relation, COUNT(*) FROM directed_edges "
-            "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+            "WHERE source=? AND relation IN ('IS_A','CAN','NOT_CAN','HAS','CAUSES','EATS','LIVES_IN') "
             "GROUP BY relation", (ent,)).fetchall()
         entropy = 0.0
         total_n = sum(n for _, n in rels)

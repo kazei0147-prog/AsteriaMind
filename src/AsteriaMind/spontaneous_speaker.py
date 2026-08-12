@@ -160,7 +160,7 @@ class SpontaneousSpeaker:
                     rels = [r[0] for r in self._ro.execute(
                         "SELECT relation FROM directed_edges WHERE source=? "
                         "AND relation IN ('IS_A','CAN','NOT_CAN','HAS',"
-                        "'EATS','LIVES_IN')", (ent,)).fetchall()]
+                        "'EATS','LIVES_IN','CAUSES')", (ent,)).fetchall()]
                     if len(rels) < 3:
                         continue
                     cnt = Counter(rels)
@@ -187,7 +187,7 @@ class SpontaneousSpeaker:
                 named = set(r[0] for r in self._ro.execute(
                     "SELECT DISTINCT source FROM directed_edges "
                     "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS',"
-                    "'EATS','LIVES_IN')").fetchall())
+                    "'EATS','LIVES_IN','CAUSES')").fetchall())
                 gaps = [w for w in vocab
                         if w not in named and len(w) >= 2][:12]
                 import random
@@ -268,6 +268,15 @@ class SpontaneousSpeaker:
                         f"但我还不认识它。", "gap")
             if kind == "predict":
                 # F15: 预测=对未来的自发发言 — 按行动类型给不同的预测语气
+                # ★ v3.9 F17: 表达预测时给对应 belief 边打标 → 未来被确认时挣回能量
+                try:
+                    if self.active_inference:
+                        be = self.active_inference.get_or_create_belief(
+                            thought["source"], thought.get("relation") or "IS_A",
+                            thought["target"])
+                        be.predicted = True
+                except Exception:
+                    pass
                 rel = thought.get("relation") or "IS_A"
                 rel_word = {"IS_A": "属于", "CAN": "能", "NOT_CAN": "不能",
                             "HAS": "有", "EATS": "吃", "LIVES_IN": "生活在",

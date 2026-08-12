@@ -66,6 +66,10 @@ ASK_PATTERNS = {
 
 def _infer_relation(text: str) -> str:
     """从问句推断在问什么关系"""
+    # ★ v3.9 F16: 因果问句 (瓶颈一: CAUSES 元逻辑) — 强因果词才归 CAUSES,
+    #   "为什么"是弱因果 (可能问否定/能力原因, 如"为什么不会飞"→NOT_CAN), 不抢占
+    if re.search(r'(?:导致|引起|造成|引发|是因为|什么原因|为何会|怎么会导致)', text):
+        return "CAUSES"
     if re.search(r'(?:不会|不能|无法|是不是不会)', text):
         return "NOT_CAN"
     if re.search(r'(?:会|能|可以|擅长|会不会|能不能)', text):

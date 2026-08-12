@@ -209,6 +209,11 @@ class OfflineLearner:
         else:
             pred = parts[1] if len(parts) > 1 else "IS_A"
             obj = parts[2] if len(parts) > 2 else ""
+            # ★ v3.9 F17 (瓶颈三): 学习前记录该边是否已存在 —
+            #   只有"新增"知识才挣回 (学习后查重永远判重复)
+            existed_before = bool(self.star_map and self.star_map.conn.execute(
+                "SELECT 1 FROM directed_edges WHERE source=? AND target=? AND relation=? LIMIT 1",
+                (subj, obj, pred)).fetchone())
             result = self.active_learner.learn_relation(subj, pred, obj)
             learned = bool(result.get("learned"))
 
@@ -217,8 +222,25 @@ class OfflineLearner:
         if learned:
             if self.active_inference:
                 self.active_inference.update_from_feedback(subj, pred, obj, True)
+            # ★ v3.9 F17 (瓶颈三): 有效信息量 → 内在挣回能量
+            #   设计原则: 只有"新增"知识 (学习前星图无此边) 才挣回 —
+            #   重复学习/重合度 ≠ 有效信息 (防"自我表扬刷能量")
+            if not existed_before:
+                self._reward_informative_learning(subj, pred, obj)
             return True
         return False
+
+    def _reward_informative_learning(self, subj: str, pred: str, obj: str) -> None:
+        """★ v3.9 F17: 有效信息量奖励 — 新增知识才挣回
+        新增知识 (可证伪, 可被未来验证) → 挣回少量能量
+        调用前提: 调用方已确认该边在学习前不存在 (重复不挣回)
+        """
+        if not self.star_map or not subj or not obj:
+            return
+        try:
+            self.star_map.restore_energy(subj, obj, 0.06)
+        except Exception:
+            pass
 
     def _store_hypothesis(self, proposal: ExplorationProposal):
         """
