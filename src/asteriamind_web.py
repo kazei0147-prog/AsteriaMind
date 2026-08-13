@@ -1551,18 +1551,38 @@ load();
             "JOIN _n ON de.rowid=_n.rowid WHERE de.relation='IS_A' "
             "GROUP BY de.target").fetchall()
         indeg_map = {t: c for t, c in indeg}
+        # ★ v3.9 (黑盒白盒讨论): 混入 co_text 黑盒热度 — 星云亮度 = 白盒骨架 + 黑盒引擎
+        #   候选 = 命名边实体 + 中枢, 取前 200 (留富余给最终排序)
+        #   co_text 出边能量 (黑盒活跃度) 归一化到 0~5 量级, 与命名边能量(≈1)同量级
+        cand = sorted(rows, key=lambda x: (x[1] + indeg_map.get(x[0], 0) * 2,
+                                           x[2]), reverse=True)[:200]
+        cand_src = {c[0] for c in cand}
+        cand += [(t, 0, 0.5) for t in hub_map if t not in cand_src]
+        api_conn.execute("CREATE TEMP TABLE _co(src TEXT PRIMARY KEY)")
+        api_conn.executemany("INSERT OR IGNORE INTO _co VALUES(?)",
+                             [(c[0],) for c in cand])
+        co_rows = api_conn.execute(
+            "SELECT de.source, SUM(COALESCE(de.energy,0.0)), COUNT(*) "
+            "FROM directed_edges de JOIN _co ON de.source=_co.src "
+            "WHERE de.relation='co_text' GROUP BY de.source").fetchall()
+        api_conn.execute("DROP TABLE _co")
+        max_heat = max((h for _, h, _ in co_rows), default=0.0)
+        co_heat = {s: (h / max_heat * 5.0 if max_heat else 0.0)
+                   for s, h, _ in co_rows}
         api_conn.execute("DROP TABLE _n")
         api_conn.close()
 
         nodes = {}
         for s, n, e in rows:
-            nodes[s] = {"entity": s, "edges": n, "energy": e,
+            nodes[s] = {"entity": s, "edges": n,
+                        "energy": round(e + co_heat.get(s, 0.0), 2),
                         "in_degree": indeg_map.get(s, 0),
                         "is_hub": s in hub_map}
         # 中枢词如果还没当过 source, 也加进星系 (分类节点必须可见)
         for t, c in hub_map.items():
             if t not in nodes:
-                nodes[t] = {"entity": t, "edges": 0, "energy": 0.5,
+                nodes[t] = {"entity": t, "edges": 0,
+                            "energy": round(0.5 + co_heat.get(t, 0.0), 2),
                             "in_degree": c, "is_hub": True}
         out = sorted(nodes.values(),
                      key=lambda x: (x["edges"] + x["in_degree"] * 2,
