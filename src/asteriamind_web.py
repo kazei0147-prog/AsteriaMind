@@ -1203,12 +1203,18 @@ async function load(){
     if(!nodes.length) throw new Error('星图还没有实体 — 先去聊几句吧');
     maxDeg = Math.max(1, ...nodes.map(n => n.edges));
     maxE = Math.max(0.0001, ...nodes.map(n => n.energy));
-    try{
-      const g2 = await (await fetch('/api/graph')).json();
-      hotSet = new Set((g2.entropy_cloud || []).map(c => c.entity));
-    }catch(e){}
     byName = new Map(nodes.map(n => [n.entity, n]));
-    cw = container.clientWidth; ch = container.clientHeight;
+    /* ★ v3.8d: 高熵集合并行拉取, 不阻塞星云渲染 (迟到再补色) */
+    fetch('/api/graph').then(r => r.json()).then(g2 => {
+      hotSet = new Set((g2.entropy_cloud || []).map(c => c.entity));
+      nodes.forEach(n => {
+        if(!n.hub && hotSet.has(n.entity) && n.sprite){
+          n.sprite.material.color.set(hexToInt('#f0883e'));
+        }
+      });
+    }).catch(() => {});
+    cw = container.clientWidth || window.innerWidth;
+    ch = container.clientHeight || window.innerHeight;
     init3d();
     layout();
     buildStars();
@@ -2643,7 +2649,9 @@ if __name__ == "__main__":
     print(f"║  Ctrl+C 退出                 ║")
     print(f"╚══════════════════════════════╝")
     print(f"  💾 {db.count()} 条已有知识")
-    server = http.server.HTTPServer(("127.0.0.1", port), AMHandler)
+    # ★ v3.8d: ThreadingHTTPServer — 慢查询(如 /api/graph 4s+)不再阻塞其他请求
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), AMHandler)
+    server.daemon_threads = True
     try:
         server.serve_forever()
     except KeyboardInterrupt:
