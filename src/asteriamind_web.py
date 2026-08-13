@@ -887,6 +887,9 @@ function init3d(){
   controls.dampingFactor = 0.08;
   controls.minDistance = 30;
   controls.maxDistance = 1200;
+  /* ★ v3.8d: 拖拽事件必须在 controls 创建后绑定 (原在顶层 load() 之前调 → undefined) */
+  controls.addEventListener('start', () => { isDragging = true; });
+  controls.addEventListener('end', () => { isDragging = false; moved = false; });
   labelRenderer = new THREE.CSS2DRenderer();
   labelRenderer.domElement.style.position = 'absolute';
   labelRenderer.domElement.style.top = '0';
@@ -1083,8 +1086,15 @@ function showCard(d){
       const box = document.getElementById('vnei');
       if(!box) return;
       if(v.neighbors && v.neighbors.length){
-        box.innerHTML = v.neighbors.slice(0, 8).map(x =>
-          '<span class="tag" onclick="focusFromTag(\'' + x.word.replace(/'/g, '') + '\')">' + x.word + ' ' + x.sim.toFixed(2) + '</span>').join('');
+        const frag = document.createDocumentFragment();
+        v.neighbors.slice(0, 8).forEach(x => {
+          const sp = document.createElement('span');
+          sp.className = 'tag';
+          sp.textContent = x.word + ' ' + x.sim.toFixed(2);
+          sp.onclick = function(){ selectEntity(x.word); };
+          frag.appendChild(sp);
+        });
+        box.appendChild(frag);
       } else box.innerHTML = '<span style="color:#8b949e">词表无此词 — 喂语料后会长出来</span>';
     }catch(e){ const box = document.getElementById('vnei'); if(box) box.innerHTML = '<span style="color:#8b949e">向量服务未启动</span>'; }
   })();
@@ -1107,8 +1117,6 @@ function showTip(n, sx, sy){
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let isDragging = false, downX = 0, downY = 0, moved = false;
-controls.addEventListener('start', () => { isDragging = true; });
-controls.addEventListener('end', () => { isDragging = false; moved = false; });
 function pick(e){
   pointer.x = (e.clientX / cw) * 2 - 1;
   pointer.y = -(e.clientY / ch) * 2 + 1;
