@@ -58,21 +58,36 @@ def _named_edge_sentences(db: str = _DB) -> list:
     """白盒知识反哺: 命名边 → 句子 (地球 是 行星 → 加入训练语料)
 
     让我们教她的知识 (IS_A/CAN/HAS/EATS...) 变成向量学习的养料
+    ★ v3.9: 加入 CAUSES/NOT_CAUSES/OPPOSITE — 元常识种子 (天上下雨→地面变湿)
+      此前漏了这三个, 元常识只在白盒 (星图) 不在黑盒 (词表), 反哺断了一条腿
     """
     conn = sqlite3.connect(db)
     rows = conn.execute(
         "SELECT source, relation, target FROM directed_edges "
-        "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN') "
+        "WHERE relation IN ('IS_A','CAN','NOT_CAN','HAS','EATS','LIVES_IN',"
+        "'CAUSES','NOT_CAUSES','OPPOSITE') "
         "AND LENGTH(source) <= 8 AND LENGTH(target) <= 8"
     ).fetchall()
     conn.close()
     rel_word = {"IS_A": "是", "CAN": "能够", "NOT_CAN": "不能",
-                "HAS": "拥有", "EATS": "吃", "LIVES_IN": "生活在"}
+                "HAS": "拥有", "EATS": "吃", "LIVES_IN": "生活在",
+                "CAUSES": "导致", "NOT_CAUSES": "不会导致",
+                "OPPOSITE": "与"}
+    # ★ v3.9: 低频词语义增强 — 元关系边重复句式 (word2vec 里重复=提高权重)
+    #   元常识词只出现 1-2 次 → 向量挤成 0.98 相似团 (学不出区分度)
+    #   重复后 天上下雨↔地面变湿 才能真正在向量空间靠近
+    REPEAT = {"CAUSES": 8, "NOT_CAUSES": 8, "OPPOSITE": 8}
     sents = []
     for s, r, t in rows:
         if r in rel_word:
-            sents.append([s, rel_word[r], t])
-            sents.append([t, rel_word[r], s])  # 双向, 增加共现
+            n = REPEAT.get(r, 1)
+            for _ in range(n):
+                if r == "OPPOSITE":
+                    sents.append([s, rel_word[r], t, "相反"])
+                    sents.append([t, rel_word[r], s, "相反"])
+                else:
+                    sents.append([s, rel_word[r], t])
+                    sents.append([t, rel_word[r], s])  # 双向, 增加共现
     print(f"种子句子: {len(sents)}")
     return sents
 
