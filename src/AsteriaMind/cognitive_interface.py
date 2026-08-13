@@ -789,6 +789,16 @@ class CognitiveInterface:
 
         REGISTRY.register(_ReasoningModule(self.reasoning))
 
+        # ★ v3.9 ID-009: HealthMonitor — 统一健康预警 (白盒观测黑盒的仪表盘)
+        #   汇总 concept health/涌现缺口/漂移/污染率/能量 → L0~L3 预警驱动介入
+        from AsteriaMind.health_monitor import HealthMonitor
+        self.health_monitor = HealthMonitor(
+            star_map=self.cognitive_star_map,
+            concept_layer=self.concept,
+            critic=self.critic,
+            registry=REGISTRY,
+        )
+
         # ── v3.3: 反映射闭环 ──
         from AsteriaMind.reflection import SessionReflector
         self._reflectors: dict[str, SessionReflector] = {}  # session_id → reflector

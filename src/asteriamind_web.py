@@ -1364,10 +1364,17 @@ load();
         self._json(assessment)
 
     def _handle_health(self):
-        """v3.3: 系统健康报告"""
+        """v3.3: 系统健康报告
+        ★ v3.9 ID-009: 附加 HealthMonitor 统一预警 (白盒观测黑盒全景)
+        """
         health = ci.mother.get_health()
         health["meta_cognition_weights"] = ci.mother.meta_cognition.get_all_weights()
         health["star_map_traces"] = ci.cognitive_star_map.count()
+        try:
+            if hasattr(ci, "health_monitor"):
+                health["health_monitor"] = ci.health_monitor.summary()
+        except Exception:
+            pass
         self._json(health)
 
     def _handle_graph(self):
