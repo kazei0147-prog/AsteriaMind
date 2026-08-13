@@ -590,6 +590,7 @@ class AMHandler(http.server.BaseHTTPRequestHandler):
     def _serve_html(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(CHAT_HTML.encode('utf-8'))
 
@@ -736,6 +737,7 @@ function exploreNode(el){ document.getElementById('entInput').value = el.getAttr
 </script></body></html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(html.encode('utf-8'))
 
@@ -1230,6 +1232,7 @@ load();
 </html>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(html.encode('utf-8'))
 
@@ -1250,6 +1253,7 @@ load();
         html_parts.append('<meta http-equiv="refresh" content="5">')  # 每5秒刷新
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write("".join(html_parts).encode('utf-8'))
 
