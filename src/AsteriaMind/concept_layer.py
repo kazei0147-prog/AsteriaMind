@@ -103,7 +103,7 @@ class ConceptLayer:
                 "misses": misses[:5]}
 
     # ── ★ v3.9 ID-018: 方向 B (黑盒→白盒): 黑盒新涌现检验白盒 ──
-    def emergence_check(self, sample: int = 15,
+    def emergence_check(self, sample: int = 8,
                         sim_threshold: float = 0.7) -> dict:
         """黑盒新涌现 vs 白盒沉淀 — 找出"黑盒直觉很强但白盒没跟上"的对
 
@@ -111,6 +111,9 @@ class ConceptLayer:
           1. 白盒知识缺口 (黑盒从新语料涌现出白盒还没沉淀的知识)
           2. 白盒陈旧边候选 (黑盒新语义已偏移, 白盒旧边该被复核)
         这是"白盒可被黑盒推翻"的检测器 — belief_check 的反向
+
+        ★ v3.9 性能: sample 默认 8 (原 15), 每词 top_k 降为 6 —
+          neighbors() 是 17842 词全量余弦, sample×top_k 直接决定耗时
         """
         vs = self._load()
         # 从命名边 source 抽种子词 (保证是系统关心的实体)
@@ -126,7 +129,7 @@ class ConceptLayer:
             if not w:
                 continue
             try:
-                ns = vs.neighbors(w, top_k=10)
+                ns = vs.neighbors(w, top_k=6)
             except Exception:
                 continue
             for n, sim in ns:

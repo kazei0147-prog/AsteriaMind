@@ -70,6 +70,9 @@ def _infer_relation(text: str) -> str:
     #   "为什么"是弱因果 (可能问否定/能力原因, 如"为什么不会飞"→NOT_CAN), 不抢占
     if re.search(r'(?:导致|引起|造成|引发|是因为|什么原因|为何会|怎么会导致)', text):
         return "CAUSES"
+    # ★ v3.9 ID-004: 相反关系 ("热和什么相反" → OPPOSITE)
+    if re.search(r'(?:相反|对立|相对|反义词)', text):
+        return "OPPOSITE"
     if re.search(r'(?:不会|不能|无法|是不是不会)', text):
         return "NOT_CAN"
     if re.search(r'(?:会|能|可以|擅长|会不会|能不能)', text):
@@ -161,6 +164,25 @@ class ThinkNode:
             except Exception:
                 pass
 
+        # ★ v3.9 ID-004: 单条边但正好问的是这条关系 → 直接答
+        #   元常识实体只有 1 条边 (天上下雨 CAUSES 地面湿), named_count>=2
+        #   永远达不到 → 全落 SEARCH。问"导致什么"且确有 CAUSES 边 → DIRECT
+        if named_count == 1:
+            single_rel = self.star_map.conn.execute(
+                "SELECT relation FROM directed_edges WHERE source=? "
+                "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS',"
+                "'EATS','LIVES_IN','ORBITS','CAUSES','NOT_CAUSES','OPPOSITE') "
+                "LIMIT 1", (subject,)).fetchone()
+            if single_rel:
+                sr = single_rel[0]
+                # 因果/反因果同域: 问"导致什么" → NOT_CAUSES 边也可答
+                #   (吃辣椒 NOT_CAUSES 感冒 → 答"不会导致感冒")
+                if sr == rel_hint or \
+                   (rel_hint == "CAUSES" and sr == "NOT_CAUSES") or \
+                   (rel_hint == "NOT_CAUSES" and sr == "CAUSES"):
+                    return ActionPlan("DIRECT", subject,
+                                      relation_hints=[rel_hint])
+
         # ── 3.5 类群概念检查: X 被多个实体 IS_A 指向 → 问"X是什么"答 X 本身 ──
         #    "甲壳动物是什么" → 甲壳动物被螃蟹/龙虾/虾归类 → SEARCH 查定义
         #    而不是反推成成员 (答虾) — REVERSE 只适合属性词 (羽毛→鸟类)
@@ -201,11 +223,24 @@ class ThinkNode:
     def _extract_subject(self, text: str) -> str:
         """提取实体 — 完整概念词优先 (甲壳动物 ≠ 动物)
 
-        v3.7: 先用向量词表做最长匹配 (jieba 分词结果 = 完整概念),
-        回退到原滑动窗口 (命名边 source 匹配)
+        ★ v3.9 ID-004 修复: 命名边 source 匹配**优先于**向量词表 —
+          此前向量词表在 w=2 命中"天上"碎片, 抢在 4 字命名边"天上下雨"之前,
+          导致元常识实体提取成残片。白盒确定知识优先, 黑盒词表补充。
         """
         clean = re.sub(r'[^\u4e00-\u9fff]', '', text)
-        # ★ v3.7: 向量词表最长匹配 — "甲壳动物是什么" → "甲壳动物"
+        NAMED_SQL = ("SELECT COUNT(*) FROM directed_edges WHERE source=? "
+                     "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS',"
+                     "'EATS','LIVES_IN','ORBITS','CAUSES','NOT_CAUSES','OPPOSITE')")
+        # ① 命名边 source 句首匹配 (白盒确定知识, 主语通常在句首)
+        #    "热和什么相反" → "热"; "天上下雨会导致什么" → "天上下雨"
+        for w in range(min(8, len(clean)), 0, -1):
+            kw = clean[:w]
+            if kw and kw not in _QUERY_WORDS:
+                c = self.star_map.conn.execute(NAMED_SQL, (kw,)).fetchone()
+                if c and c[0] > 0:
+                    return kw
+        # ② 向量词表最长匹配 (黑盒完整概念 — "甲壳动物" 在词表,
+        #    优先于句中"动物"碎片)
         vocab = _get_vocab(self.star_map)
         if vocab:
             for w in range(min(8, len(clean)), 1, -1):
@@ -213,16 +248,13 @@ class ThinkNode:
                     kw = clean[i:i + w]
                     if kw in vocab and kw not in _QUERY_WORDS:
                         return kw
-        # 回退: 原滑动窗口 (命名边 source 匹配)
-        for w in (3, 2, 1):
+        # ③ 命名边 source 全滑动 (句中实体兜底)
+        for w in range(min(8, len(clean)), 0, -1):
             for i in range(len(clean) - w + 1):
                 kw = clean[i:i + w]
-                if kw in ('什么', '怎么', '哪里', '为什么', '是不是', '会不会'):
+                if kw in _QUERY_WORDS:
                     continue
-                c = self.star_map.conn.execute(
-                    "SELECT COUNT(*) FROM directed_edges WHERE source=? "
-                    "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS')",
-                    (kw,)).fetchone()
+                c = self.star_map.conn.execute(NAMED_SQL, (kw,)).fetchone()
                 if c and c[0] > 0:
                     return kw
         # 回退: 取前 3 个汉字
@@ -233,7 +265,7 @@ class ThinkNode:
     def _count_named_edges(self, subject: str) -> int:
         return self.star_map.conn.execute(
             "SELECT COUNT(*) FROM directed_edges WHERE source=? "
-            "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS')",
+            "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS','EATS','LIVES_IN','ORBITS','CAUSES','NOT_CAUSES','OPPOSITE')",
             (subject,)).fetchone()[0]
 
     def _count_in_is_a(self, subject: str) -> int:

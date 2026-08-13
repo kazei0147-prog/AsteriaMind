@@ -56,9 +56,10 @@ class HealthMonitor:
         signals = {}
 
         # ① concept health (方向A 白盒验黑盒)
+        #    小样本控制耗时: emergence 逐个向量近邻较慢 (17842 词全量余弦)
         if self.concept and hasattr(self.concept, "dual_check"):
             try:
-                dual = self.concept.dual_check(sample=10)
+                dual = self.concept.dual_check(sample=6)
                 signals["concept_health"] = dual[
                     "direction_a_whitebox_to_blackbox"]["consistency"]
                 signals["emergence_gap"] = dual[

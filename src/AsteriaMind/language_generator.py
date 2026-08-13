@@ -375,7 +375,20 @@ class LanguageGenerator:
                 parts.append(f"{word or '吃'}{'、'.join(targets)}")
             elif rel == "LIVES_IN":
                 parts.append(f"{word or '生活在'}{'、'.join(targets)}")
+            elif rel in ("NOT_CAUSES",):
+                # 反因果: "吃辣椒不会导致感冒"
+                prefix = word or "不会导致"
+                parts.append(f"{prefix}{'、'.join(targets)}")
+            elif rel == "CAUSES":
+                # 因果: "天上下雨导致地面变湿"
+                parts.append(f"{word or '导致'}{'、'.join(targets)}")
+            elif rel == "OPPOSITE":
+                # 相反: "热与冷相反"
+                parts.append(f"{word or '与'}{'、'.join(targets)}相反")
 
+        # 空 parts 兜底 (未知关系组合 — 防 parts[0] 越界)
+        if not parts:
+            return f"{subj}和这些概念有关。"
         if len(parts) == 1:
             return f"{subj}{parts[0]}。"
 
