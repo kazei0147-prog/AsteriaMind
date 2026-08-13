@@ -1566,14 +1566,29 @@ load();
         self._json({"nodes": node_list, "edges": edges})
 
     def _handle_vector(self, word: str):
-        """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层, 走概念层唯一入口)"""
+        """★ v3.6: 向量空间 — 语义近邻 (黑盒联想层, 走概念层唯一入口)
+        ★ v3.9 ID-018: 附加双向判读摘要 (白盒验黑盒 + 黑盒验白盒)
+        """
         try:
             concept = REGISTRY.get("concept") or ci.concept
             ns = concept.run(word, 10)
-            self._json({
+            resp = {
                 "word": word,
                 "neighbors": [{"word": w, "sim": round(s, 3)} for w, s in ns],
-            })
+            }
+            # 双向判读: 低频小样本体检 (HealthMonitor 数据源)
+            try:
+                cl = getattr(concept, "inner", concept)  # 包装模块 → 取 ConceptLayer
+                if hasattr(cl, "dual_check"):
+                    dual = cl.dual_check(sample=8)
+                    resp["dual_check"] = {
+                        "direction_a": dual["direction_a_whitebox_to_blackbox"]["consistency"],
+                        "direction_b_emergent": dual["direction_b_blackbox_to_whitebox"]["emergent_count"],
+                        "level": dual["verdict"]["level"],
+                    }
+            except Exception:
+                pass
+            self._json(resp)
         except Exception as e:
             self._json({"word": word, "error": str(e)[:120],
                         "neighbors": []})
