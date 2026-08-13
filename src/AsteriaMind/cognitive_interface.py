@@ -799,6 +799,21 @@ class CognitiveInterface:
             registry=REGISTRY,
         )
 
+        class _HealthModule(CognitiveModule):
+            name = "monitor"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, force=False):
+                return self.inner.summary()
+            def health(self):
+                try:
+                    return self.inner.report()["health_score"]
+                except Exception:
+                    return 0.5
+
+        REGISTRY.register(_HealthModule(self.health_monitor))
+
         # ── v3.3: 反映射闭环 ──
         from AsteriaMind.reflection import SessionReflector
         self._reflectors: dict[str, SessionReflector] = {}  # session_id → reflector
