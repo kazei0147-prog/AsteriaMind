@@ -689,8 +689,22 @@ class CognitiveInterface:
         REGISTRY.register(_ConceptModule(self.concept))
 
         # IntentLearner: 意图统计学习 — 从反馈替代正则
+        # ★ v3.9 ID-010: 收编进注册表
         from AsteriaMind.intent_learner import IntentLearner
         self.intent_learner = IntentLearner(self.cognitive_star_map)
+
+        class _IntentModule(CognitiveModule):
+            name = "intent"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, text):
+                return self.inner.predict(text)
+            def health(self):
+                s = self.inner.summary()
+                return min(1.0, 0.3 + s["learned_patterns"] * 0.1)
+
+        REGISTRY.register(_IntentModule(self.intent_learner))
 
         # ActionPrimitives: 动作原语 — 动词→动作绑定, 反馈学习
         from AsteriaMind.action_primitives import ActionPrimitives
@@ -711,6 +725,7 @@ class CognitiveInterface:
         self.dream_module = DreamModule(self.cognitive_star_map)
 
         # OfflineLearner: 离线学习循环 (AM 闲时自主学习, 好奇心引擎)
+        # ★ v3.9 ID-010: 收编进注册表 — 可热插拔
         from AsteriaMind.offline_learner import OfflineLearner
         self.offline_learner = OfflineLearner(
             star_map=self.cognitive_star_map,
@@ -721,8 +736,21 @@ class CognitiveInterface:
             concept=self.concept,  # ★ v3.7: 概念层缺口想法源
         )
 
+        class _OfflineModule(CognitiveModule):
+            name = "offline"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, *args, **kwargs):
+                return self.inner.run_cycle()
+            def health(self):
+                return min(1.0, 0.3 + len(self.inner.history) * 0.1)
+
+        REGISTRY.register(_OfflineModule(self.offline_learner))
+
         # ★ v3.7: 自发发言器 — 想说什么就说什么 (输出=f(内部状态))
         # ★ F15 (v3.9): 注入 active_inference — 预测=对未来的自发发言 (U-03 方案 B)
+        # ★ v3.9 ID-010: 收编进注册表 — 可热插拔
         from AsteriaMind.spontaneous_speaker import SpontaneousSpeaker
         self.speaker = SpontaneousSpeaker(
             star_map=self.cognitive_star_map,
@@ -731,9 +759,35 @@ class CognitiveInterface:
             active_inference=self.mother.active_inference,
         )
 
+        class _SpeakerModule(CognitiveModule):
+            name = "speaker"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, force=False):
+                return self.inner.tick(force=force)
+            def health(self):
+                # 发言器健康度: 有输出过就是活的, 否则低分
+                return min(1.0, 0.3 + self.inner.total_spoken * 0.05)
+
+        REGISTRY.register(_SpeakerModule(self.speaker))
+
         # ★ v3.8: 推理链 — 传递推理 (企鹅→鸟类→脊椎动物)
+        # ★ v3.9 ID-010: 收编进注册表 — 可热插拔 (换推理实现不重启)
         from AsteriaMind.reasoning_chain import ReasoningChain
         self.reasoning = ReasoningChain(self.cognitive_star_map)
+
+        class _ReasoningModule(CognitiveModule):
+            name = "reasoning"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, subject, max_hops=2, top_k=4):
+                return self.inner.infer(subject, max_hops=max_hops, top_k=top_k)
+            def health(self):
+                return 1.0
+
+        REGISTRY.register(_ReasoningModule(self.reasoning))
 
         # ── v3.3: 反映射闭环 ──
         from AsteriaMind.reflection import SessionReflector

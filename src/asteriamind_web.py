@@ -1935,10 +1935,12 @@ load();
 
             # ★ v3.8: 推理链 — IS_A 意图时补传递推理 (企鹅→鸟类→脊椎动物)
             #   已知的边不再重复, 只补两跳推理 (一跳 IS_A 已在 edges)
-            if hasattr(ci, 'reasoning') and "IS_A" in (intent or ""):
+            # ★ v3.9 ID-010: 走注册表 (可热插拔), 卸载/禁用则回退直连
+            reasoning_mod = REGISTRY.get("reasoning")
+            if reasoning_mod and "IS_A" in (intent or ""):
                 try:
                     known = {e["target"] for e in edges}
-                    for r in ci.reasoning.infer(subj, top_k=3):
+                    for r in reasoning_mod.run(subj, top_k=3):
                         if r["hops"] < 2 or r["target"] in known:
                             continue
                         edges.append({
@@ -2553,9 +2555,11 @@ if __name__ == "__main__":
                               f"skipped={result['skipped']}")
 
                     # ★ v3.7: 学完有想法 → 自发发言 (不等用户输入)
+                    # ★ v3.9 ID-010: 走注册表 (speaker 可热插拔), 卸载则静默跳过
                     try:
-                        if hasattr(ci, 'speaker'):
-                            n = ci.speaker.tick()
+                        spk = REGISTRY.get("speaker")
+                        if spk:
+                            n = spk.run()
                             if n > 0:
                                 print(f"\n  💭 AM 自发发言: 说了 {n} 条")
                     except Exception as se:
@@ -2570,8 +2574,10 @@ if __name__ == "__main__":
     def _speaker_loop():
         while True:
             try:
-                if hasattr(ci, 'speaker'):
-                    n = ci.speaker.tick()
+                # ★ v3.9 ID-010: 走注册表 (speaker 可热插拔), 卸载则静默跳过
+                spk = REGISTRY.get("speaker")
+                if spk:
+                    n = spk.run()
                     if n > 0:
                         print(f"\n  💭 AM 自发发言: {n} 条")
             except Exception as e:
