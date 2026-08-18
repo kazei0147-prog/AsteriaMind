@@ -1303,9 +1303,41 @@ load();
                 }
                 self.SESSIONS[sid] = session
 
+            # ★ v3.9 F13: 指代消解 — "那黑盒呢/它是什么" 用会话最近实体展开
+            try:
+                cur = CONV_MEMORY.db.conn.cursor()
+                cur.execute("SELECT last_entities FROM session_context WHERE session_id=?",
+                            (sid,))
+                srow = cur.fetchone()
+                if srow and srow[0]:
+                    import json as _json
+                    _ents = _json.loads(srow[0])
+                    if _ents:
+                        m = re.match(r'^(它|这个|那个|他|她|那|这)(研究|是|会|能|吃|住在|生活|属于|导致|有什么|怎么样|怎么|在哪里|哪|呢|是什么|是啥|吗|啥)', text)
+                        if m:
+                            text = _ents[0] + m.group(2)
+                    # "那X呢/那个X呢" → 剥掉代词, 保留话题实体 (话题延续)
+                    m2 = re.match(r'^(那|这个|那个|这)(.+呢)$', text)
+                    if m2:
+                        text = m2.group(2)
+            except Exception:
+                pass
+
             # ── 短期记忆: 最近 4 轮对话 ★ ──
             topic = self._extract_topic(text)
             CONV_MEMORY.add(sid, "user", text, topic)
+            # ★ v3.9 F13: 会话元数据 (实体+话题链+轮数) + 滚动摘要
+            try:
+                ents = [topic] if topic else []
+                for _w in re.findall(r'[\u4e00-\u9fff]{2,6}', text)[:3]:
+                    if _w in ("什么", "怎么", "为什么", "哪里", "这个", "那个", "就是", "不是", "可以", "我们", "知道", "觉得", "呢", "吗", "是什么", "怎么样", "研究", "请问"):
+                        continue
+                    if _w != topic and _w not in ents and len(ents) < 3:
+                        ents.append(_w)
+                CONV_MEMORY.update_session_meta(sid, ents, topic)
+                CONV_MEMORY.roll_summary(sid, every=5)
+            except Exception:
+                pass
             # ★ v3.8: 对话语料实时回流 — 用户的话是她该学的说话方式
             try:
                 _REPLAY.ingest(text)
@@ -1331,6 +1363,22 @@ load();
             session["exchange_count"] += 1
 
             CONV_MEMORY.add(sid, "am", reply, topic)
+            # ★ v3.9 F13: 回复实体也进会话元数据 — "它"可指代 AM 刚提到的内容
+            #   只收星图确认的实体, 防噪音 (如"我还没学过"这类短语)
+            try:
+                rent = []
+                for _w in re.findall(r'[\u4e00-\u9fff]{2,6}', reply)[:4]:
+                    if _w in ("什么", "怎么", "为什么", "哪里", "这个", "那个", "就是", "不是", "可以", "我们", "知道", "觉得", "一个", "一下", "没有", "如果", "因为", "所以", "或者"):
+                        continue
+                    has = ci.mother.star_map.conn.execute(
+                        "SELECT 1 FROM directed_edges WHERE source=? OR target=? LIMIT 1",
+                        (_w, _w)).fetchone()
+                    if has and _w not in rent and len(rent) < 2:
+                        rent.append(_w)
+                if rent:
+                    CONV_MEMORY.update_session_meta(sid, rent, topic)
+            except Exception:
+                pass
 
             # ── 构建响应 (含反映射信息) ──
             resp_data = {
@@ -1694,7 +1742,9 @@ load();
     def _extract_topic(self, text: str) -> str:
         """从一句话提取核心话题词"""
         # 去问号/语气词
-        clean = text.rstrip('?？吗').strip()
+        clean = text.rstrip('?？吗呢').strip()
+        # ★ v3.9 F13: 剥话题延续代词 — "那Levelt呢/这个黑盒呢" → Levelt/黑盒
+        clean = re.sub(r'^(那个|这个|它|他|她|那|这)', '', clean).strip()
         # "你了解X吗" → X
         m = re.search(r'(?:了解|知道|懂|认识)(.+)', clean)
         if m: return m.group(1).strip()
