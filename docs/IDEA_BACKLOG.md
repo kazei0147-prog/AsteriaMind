@@ -56,3 +56,4 @@
 | --- | --- | --- | --- | --- |
 | ID-000 | 2026-08-08~11 | v3.8 前端全面升级（主题/打字指示器/记录持久化/Canvas 星系/three.js 3D） | ✅ | b90a836/beb9608/e14e145 |
 | ID-00X | 2026-07 起 | 双循环学习（在线/离线）、反射引擎、MetaCognition 权重学习、ActiveInference 规划 | ✅ | 历史提交 |
+| 补-2026-08-20 | 2026-08-20 | 搜索主动脉修复：falsification.py/active_learner.py 三处复制粘贴双定义事故 + searx.be 死配置；ddgs 真实搜索打通，提取污染清零，离线 learned>0 验证达成（v3.3 遗留清账） | ✅ | 0ddb8a4 |
