@@ -461,10 +461,16 @@ class ActiveLearner:
                 return False
             if '的' in s:
                 return False
+            # 疑问助词残留: "鸵鸟是鸟类吗还" (截断的疑问句)
+            if any(q in s for q in ('吗', '呢', '么', '吧')):
+                return False
+            # 切分残留: "鸵鸟是"(是不是) / "鸵鸟还"(还是) / "鸵鸟或"(或是)
+            if s.endswith(('是', '还', '或', '和', '跟')):
+                return False
             return True
 
         def _valid_object(o: str) -> bool:
-            """客体是否合法? 排除问句和碎片"""
+            """客体是否合法? 排除问句、否定词残留和碎片"""
             o = _clean_entity(o)
             if not o or len(o) < 2:
                 return False
@@ -472,24 +478,16 @@ class ActiveLearner:
                 return False
             if o.endswith('吗') or o.endswith('呢') or o.endswith('吧') or o.endswith('么'):
                 return False
+            # 疑问助词残留: "鸟类吗还是兽类" (疑问句截断)
+            if any(q in o for q in ('吗', '呢', '么', '吧')):
+                return False
             if '什么' in o or '怎么' in o or '为什么' in o:
                 return False
-            # 不能是 "不是X" 或 "没有X" 形式 (否定应该在谓词, 不在客体)
+            # 不能是 "不是X" / "没有X" 残留 (否定应在谓词, 不在客体)
             if o.startswith('不') or o.startswith('没'):
                 return False
-            return True
-
-        def _valid_object(o: str) -> bool:
-            """客体是否合法? 排除问句和碎片"""
-            o = o.strip()
-            if not o or len(o) < 2:
-                return False
-            if o in _skip_o:
-                return False
-            # 不能是问句
-            if o.endswith('吗') or o.endswith('呢') or o.endswith('吧'):
-                return False
-            if '什么' in o or '怎么' in o or '为什么' in o:
+            # 疑问量词片段: "跑多快" "有多大" "几千米"
+            if re.search(r'多[快大高长重少深远]', o) or re.search(r'几[点个种条只年]', o):
                 return False
             return True
 
@@ -502,9 +500,9 @@ class ActiveLearner:
             if not sent or len(sent) < 2:
                 continue
 
-            # "X不是Y" → NOT_IS_A (先于"是"处理)
+            # "X不是Y" → NOT_IS_A (先于"是"处理; (?<!是) 跳过"是不是"疑问式)
             for m in re.finditer(
-                r'([\u4e00-\u9fff\w]{2,8})不是([\u4e00-\u9fff\w]{1,18})', sent):
+                r'([\u4e00-\u9fff\w]{2,8})(?<!是)不是([\u4e00-\u9fff\w]{1,18})', sent):
                 s, o = _clean_entity(m.group(1)), _clean_entity(m.group(2))
                 if _valid_subject(s) and _valid_object(o):
                     facts.append({"subj": s, "pred": "NOT_IS_A", "obj": o})

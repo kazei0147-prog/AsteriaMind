@@ -59,10 +59,15 @@ from AsteriaMind.module_registry import REGISTRY
 # ── AM 初始化 ──
 import os, json
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "")
-try:
-    with open("asteria_config.json", "r") as f:
-        SEARXNG_URL = SEARXNG_URL or json.load(f).get("searxng_url", "")
-except Exception: pass
+_here = os.path.dirname(os.path.abspath(__file__))
+for _cfg in (os.path.join(_here, "asteria_config.json"),
+             os.path.join(_here, "..", "..", "asteria_config.json")):
+    try:
+        with open(_cfg, "r") as f:
+            SEARXNG_URL = SEARXNG_URL or json.load(f).get("searxng_url", "")
+            break
+    except Exception:
+        pass
 
 kg = KnowledgeGraph()
 db = KnowledgeDB("asteriamind.db")
