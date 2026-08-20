@@ -789,6 +789,23 @@ class CognitiveInterface:
 
         REGISTRY.register(_ReasoningModule(self.reasoning))
 
+        # ★ v3.9 ID-024①: ArgumentGate — 白盒论证闸门 (v2.0 ArgumentEvaluator 回归重铸)
+        #   涌现候选之后、输出之前: 论证竞争选答案 + 反证压制质检 (可热插拔)
+        from AsteriaMind.argument_gate import ArgumentGate
+        self.argument_gate = ArgumentGate(self.cognitive_star_map)
+
+        class _ArgumentModule(CognitiveModule):
+            name = "argument"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, subject, edges, top_k=6):
+                return self.inner.evaluate(subject, edges, top_k=top_k)
+            def health(self):
+                return 1.0
+
+        REGISTRY.register(_ArgumentModule(self.argument_gate))
+
         # ★ v3.9 ID-009: HealthMonitor — 统一健康预警 (白盒观测黑盒的仪表盘)
         #   汇总 concept health/涌现缺口/漂移/污染率/能量 → L0~L3 预警驱动介入
         from AsteriaMind.health_monitor import HealthMonitor

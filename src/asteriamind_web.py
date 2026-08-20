@@ -2070,6 +2070,15 @@ load();
                     pass
 
             edges = apply_intent_weight(edges, intent)
+            # ★ v3.9 ID-024①: 白盒论证闸门 — 候选论证竞争 + 反证压制 (走注册表, 可卸载)
+            gate_audit = None
+            gate_mod = REGISTRY.get("argument")
+            if gate_mod and edges:
+                edges, gate_audit = gate_mod.run(subj, edges)
+                if not edges:
+                    return (f"🤔 关于「{subj}」，我手头的证据互相打架，"
+                            f"暂时不敢乱说——你能教我正确的吗？",
+                            "argument_blocked", {"gate": gate_audit})
             # ★ v3.7: 统计语言生成 — 她自己的句式 (骨架池采样), 模板只兜底
             narrative = _speak_with_own_language(subj, edges)
             if not narrative:
@@ -2107,9 +2116,11 @@ load();
                         "target": e["target"],
                         "energy": e.get("energy", 0),
                         "salience": e.get("salience", 0),
+                        "argument_strength": e.get("argument_strength", 0),
                         "inferred": e.get("inferred", False),
                         "path": e.get("path", []),
                     } for e in edges[:6]],
+                    "argument_gate": gate_audit,   # ★ ID-024①: 论证审计 (mode/gap/eliminated)
                     "ts": time.time(),
                 }
                 # ★ v3.6: 自学习 — 每个成功回答更新自我认知 ★
