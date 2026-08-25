@@ -333,6 +333,10 @@ class CognitiveStarMap:
     """统一星图——共现向量 + 语言涌现 + 能量代谢"""
 
     def __init__(self, db_path: str = "asteriamind.db", co_db: str = ""):
+        # ★ v3.9 测试隔离修复: ASTERIA_DB 环境变量覆盖默认库 (显式传参优先)
+        #   测试设 ASTERIA_DB=test_x.db 但星图硬编码默认库 → 连活库 → 断言依赖活库状态
+        if db_path == "asteriamind.db":
+            db_path = os.environ.get("ASTERIA_DB", db_path)
         # ★ v3.7: timeout=30 — 后台线程写锁时, 回答请求等锁而不是 5s 放弃
         self.conn = sqlite3.connect(db_path, check_same_thread=False,
                                     timeout=30)
