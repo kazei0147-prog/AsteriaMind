@@ -48,8 +48,34 @@ class ArgumentGate:
     GAP_THRESHOLD = 0.15      # 差距判据: > 此值为明显赢家 (继承 v2.0 agreement_threshold)
     SUPPRESS_RATIO = 1.15     # 反边强度 > 1.15 × 候选 → 压制
 
-    def __init__(self, star_map=None):
+    def __init__(self, star_map=None, health_monitor=None):
         self.star_map = star_map
+        self.health_monitor = health_monitor
+
+    # ── 动态阈值 (ID-024⑤: 白盒健康时敢激进, 亚健康时保守) ──
+    def _thresholds(self) -> tuple[float, float]:
+        """接 HealthMonitor 预警等级 → (gap_threshold, suppress_ratio)
+
+        L0 normal    健康   → gap 收紧 0.10 果断选答案, 压制比放宽 1.05 敢杀弱候选
+        L1 attention 关注   → 默认 0.15 / 1.15
+        L2 warning   亚健康 → gap 放宽 0.20 多并列留余地, 压制比收紧 1.25 少误杀
+        L3 critical  病危   → 最保守 0.25 / 1.30, 少下结论多请教
+
+        report() 带 60s 缓存 — 每请求查一次不扫库, 轻量
+        """
+        if not self.health_monitor:
+            return self.GAP_THRESHOLD, self.SUPPRESS_RATIO
+        try:
+            level = self.health_monitor.report().get("level", "normal")
+        except Exception:
+            return self.GAP_THRESHOLD, self.SUPPRESS_RATIO
+        table = {
+            "normal":    (0.10, 1.05),
+            "attention": (0.15, 1.15),
+            "warning":   (0.20, 1.25),
+            "critical":  (0.25, 1.30),
+        }
+        return table.get(level, (self.GAP_THRESHOLD, self.SUPPRESS_RATIO))
 
     # ── 论证强度 ──
     def _edge_strength(self, e: dict, max_salience: float) -> float:
@@ -83,20 +109,22 @@ class ArgumentGate:
             return 0.0
         return min(1.0, 0.4 + 0.45 * min(1.0, math.log10(n + 1) / math.log10(11)))
 
-    def _edge_evidence(self, subj: str, target: str, relation: str) -> float:
-        """边证据强度: weight × confidence × energy (同单位比较, 不混检索相关性)"""
+    def _edge_evidence(self, subj: str, target: str, relation: str) -> tuple[float, str]:
+        """边证据强度: weight × confidence × energy (同单位比较, 不混检索相关性)
+        返回 (evidence, tier) — tier 供 A 层保护 (ID-024③)"""
         if not self.star_map:
-            return 0.0
+            return 0.0, "B"
         try:
             row = self.star_map.conn.execute(
-                "SELECT weight, COALESCE(confidence,0.5), COALESCE(energy,1.0) "
-                "FROM directed_edges WHERE source=? AND target=? AND relation=?",
+                "SELECT weight, COALESCE(confidence,0.5), COALESCE(energy,1.0), "
+                "COALESCE(tier,'B') FROM directed_edges WHERE source=? AND target=? AND relation=?",
                 (subj, target, relation)).fetchone()
         except Exception:
-            return 0.0
+            return 0.0, "B"
         if not row:
-            return 0.0
-        return float(row[0] or 1) * float(row[1] or 0.5) * float(row[2] or 1.0)
+            return 0.0, "B"
+        ev = float(row[0] or 1) * float(row[1] or 0.5) * float(row[2] or 1.0)
+        return ev, (row[3] or "B")
 
     # ── 主入口 ──
     def evaluate(self, subject: str, edges: list[dict],
@@ -111,6 +139,7 @@ class ArgumentGate:
             return edges, {"mode": "empty", "gap": 0.0, "eliminated": [],
                            "top_strength": 0.0}
 
+        gap_th, sup_ratio = self._thresholds()
         eliminated = []
 
         # ── 质检: 反证压制 ──
@@ -121,20 +150,24 @@ class ArgumentGate:
             target = e.get("target", "")
             suppressed = False
             if neg_rel and target:
-                cand_ev = self._edge_evidence(subject, target, rel)
-                neg = self._edge_evidence(subject, target, neg_rel)
+                cand_ev, cand_tier = self._edge_evidence(subject, target, rel)
+                neg_ev, neg_tier = self._edge_evidence(subject, target, neg_rel)
                 # 推论 (inferred) 不与直接反边对抗 — 直接除名
-                if e.get("inferred") and neg > 0:
+                if e.get("inferred") and neg_ev > 0:
                     eliminated.append({
                         "edge": f"{subject} {rel} {target}",
                         "reason": f"推论被直接反边 {neg_rel} 否决",
                     })
                     suppressed = True
-                elif neg > self.SUPPRESS_RATIO * max(cand_ev, 0.1):
+                # ★ v3.9 ID-024③: A 层保护 — B 层反边不压制 A 层边
+                #   A 层=外部锚验证的核心骨架, 只有同为 A 层的反证才能动摇它
+                elif cand_tier == "A" and neg_tier != "A":
+                    pass
+                elif neg_ev > sup_ratio * max(cand_ev, 0.1):
                     eliminated.append({
                         "edge": f"{subject} {rel} {target}",
                         "reason": f"被更强反边 {neg_rel} 压制 "
-                                  f"(反边证据 {neg:.2f} > {self.SUPPRESS_RATIO}×候选 {cand_ev:.2f})",
+                                  f"(反边证据 {neg_ev:.2f} > {sup_ratio}×候选 {cand_ev:.2f})",
                     })
                     suppressed = True
             if not suppressed:
@@ -152,12 +185,14 @@ class ArgumentGate:
         gap = 0.0
         if len(survivors) >= 2:
             gap = survivors[0]["argument_strength"] - survivors[1]["argument_strength"]
-        mode = ("single" if (len(survivors) < 2 or gap > self.GAP_THRESHOLD)
+        mode = ("single" if (len(survivors) < 2 or gap > gap_th)
                 else "tie")
 
         audit = {
             "mode": mode,
             "gap": round(gap, 3),
+            "gap_threshold": gap_th,
+            "suppress_ratio": sup_ratio,
             "eliminated": eliminated,
             "top_strength": survivors[0]["argument_strength"] if survivors else 0.0,
         }

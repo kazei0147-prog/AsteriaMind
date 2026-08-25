@@ -90,4 +90,43 @@ assert m is None or m.name == "argument"  # 独立进程时为 None, 联动时�
 print("T6 注册表契约 ✓ (独立运行不炸)")
 passed += 1
 
-print(f"\n✅ ArgumentGate {passed}/6 通过")
+# ── T7: 动态阈值 (ID-024⑤) — 健康时敢激进, 亚健康时保守 ──
+class FakeHM:
+    def __init__(self, level): self._level = level
+    def report(self): return {"level": self._level}
+
+# 候选强度差 ≈0.105: 默认阈值 0.15 → tie; L0 阈值 0.10 → single; L3 阈值 0.25 → tie
+mid_cand = [
+    {"source": "X", "relation": "IS_A", "target": "甲",
+     "salience": 1.0, "energy": 1.0, "confidence": 0.8},
+    {"source": "X", "relation": "IS_A", "target": "乙",
+     "salience": 0.7, "energy": 1.0, "confidence": 0.8},
+]
+_, a_def = gate.evaluate("X", [dict(c) for c in mid_cand])
+assert a_def["mode"] == "tie", f"默认应 tie: {a_def['mode']} gap={a_def['gap']}"
+gate_l0 = ArgumentGate(star, health_monitor=FakeHM("normal"))
+_, a_l0 = gate_l0.evaluate("X", [dict(c) for c in mid_cand])
+assert a_l0["mode"] == "single", f"L0 健康应果断 single: {a_l0}"
+assert a_l0["gap_threshold"] == 0.10, f"L0 gap 阈值应 0.10: {a_l0}"
+gate_l3 = ArgumentGate(star, health_monitor=FakeHM("critical"))
+_, a_l3 = gate_l3.evaluate("X", [dict(c) for c in mid_cand])
+assert a_l3["mode"] == "tie", f"L3 病危应保守 tie: {a_l3}"
+assert a_l3["gap_threshold"] == 0.25, f"L3 gap 阈值应 0.25: {a_l3}"
+
+# 压制比动态: 反边证据 11 vs 候选 10 → L0(1.05) 压制, 默认(1.15) 不压制
+star3 = CognitiveStarMap(":memory:")
+for _ in range(10):
+    star3.store("X", "IS_A", "Y", "confirmed", "弱候选")
+for _ in range(11):
+    star3.store("X", "NOT_IS_A", "Y", "confirmed", "反证")
+weak_cand = [{"source": "X", "relation": "IS_A", "target": "Y",
+              "salience": 0.5, "energy": 1.0, "confidence": 0.8}]
+_, a_s_def = gate.evaluate("X", [dict(c) for c in weak_cand])
+assert len(a_s_def["eliminated"]) == 0, f"默认 1.15 不压制: {a_s_def['eliminated']}"
+gate3_l0 = ArgumentGate(star3, health_monitor=FakeHM("normal"))
+_, a_s_l0 = gate3_l0.evaluate("X", [dict(c) for c in weak_cand])
+assert len(a_s_l0["eliminated"]) == 1, f"L0 1.05 应压制: {a_s_l0['eliminated']}"
+print(f"T7 动态阈值 ✓  gap: 默认tie/L0 single/L3 tie; 压制比: 默认放过/L0 杀")
+passed += 1
+
+print(f"\n✅ ArgumentGate {passed}/7 通过")

@@ -789,23 +789,6 @@ class CognitiveInterface:
 
         REGISTRY.register(_ReasoningModule(self.reasoning))
 
-        # ★ v3.9 ID-024①: ArgumentGate — 白盒论证闸门 (v2.0 ArgumentEvaluator 回归重铸)
-        #   涌现候选之后、输出之前: 论证竞争选答案 + 反证压制质检 (可热插拔)
-        from AsteriaMind.argument_gate import ArgumentGate
-        self.argument_gate = ArgumentGate(self.cognitive_star_map)
-
-        class _ArgumentModule(CognitiveModule):
-            name = "argument"
-            version = "1.0"
-            def __init__(self, inner):
-                super().__init__(); self.inner = inner
-            def run(self, subject, edges, top_k=6):
-                return self.inner.evaluate(subject, edges, top_k=top_k)
-            def health(self):
-                return 1.0
-
-        REGISTRY.register(_ArgumentModule(self.argument_gate))
-
         # ★ v3.9 ID-009: HealthMonitor — 统一健康预警 (白盒观测黑盒的仪表盘)
         #   汇总 concept health/涌现缺口/漂移/污染率/能量 → L0~L3 预警驱动介入
         from AsteriaMind.health_monitor import HealthMonitor
@@ -830,6 +813,25 @@ class CognitiveInterface:
                     return 0.5
 
         REGISTRY.register(_HealthModule(self.health_monitor))
+
+        # ★ v3.9 ID-024①+⑤: ArgumentGate — 白盒论证闸门 (v2.0 ArgumentEvaluator 回归重铸)
+        #   涌现候选之后、输出之前: 论证竞争选答案 + 反证压制质检 (可热插拔)
+        #   ⑤ 动态阈值: 接 HealthMonitor 预警等级 — 白盒健康时敢激进, 亚健康时保守
+        from AsteriaMind.argument_gate import ArgumentGate
+        self.argument_gate = ArgumentGate(self.cognitive_star_map,
+                                          health_monitor=self.health_monitor)
+
+        class _ArgumentModule(CognitiveModule):
+            name = "argument"
+            version = "1.0"
+            def __init__(self, inner):
+                super().__init__(); self.inner = inner
+            def run(self, subject, edges, top_k=6):
+                return self.inner.evaluate(subject, edges, top_k=top_k)
+            def health(self):
+                return 1.0
+
+        REGISTRY.register(_ArgumentModule(self.argument_gate))
 
         # ── v3.3: 反映射闭环 ──
         from AsteriaMind.reflection import SessionReflector
@@ -968,9 +970,11 @@ class CognitiveInterface:
         return self.mother.active_inference.plan_actions(candidates, top_k=top_k)
 
     def consolidate(self) -> dict:
-        """触发记忆巩固——后台低频调用"""
+        """触发记忆巩固——后台低频调用 (ID-024③: B→A 四锚升级需要 critic/concept)"""
         from AsteriaMind.memory_consolidation import MemoryConsolidation
-        mc = MemoryConsolidation(self.cognitive_star_map)
+        mc = MemoryConsolidation(self.cognitive_star_map,
+                                 critic=getattr(self, "critic", None),
+                                 concept=getattr(self, "concept", None))
         return mc.consolidate()
 
     def _load_kg_primitives(self):
@@ -1060,7 +1064,9 @@ class CognitiveInterface:
             subj, pred, obj = s.get("subject"), s.get("predicate"), s.get("object")
             if subj and pred and obj:
                 # 同时存向量痕迹 + KG (双写过渡期)
-                self.cognitive_star_map.store(subj, pred, obj, "confirmed", text)
+                # ★ v3.9 ID-024②: 用户亲口教 → 直送 A 层核心骨架
+                self.cognitive_star_map.store(subj, pred, obj, "confirmed", text,
+                                              source="teach")
                 if self.kg and self.db:
                     self.kg.add(subj, pred, obj, confidence=0.7)
                     self.db.add_relation(subj, pred, obj, 0.7, source="web")
