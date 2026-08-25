@@ -24,18 +24,21 @@ class MemoryConsolidation:
       - 衰减冷知识
     """
 
-    def __init__(self, star_map=None):
+    def __init__(self, star_map=None, critic=None, concept=None):
         self.star_map = star_map
+        self.critic = critic          # ID-024③ 锚2: 批判者熵
+        self.concept = concept        # ID-024③ 锚4: 双向判读 (ID-018)
         self.clusters: dict[str, set] = {}       # cluster_id → {entities}
         self.cluster_centroids: dict[str, str] = {}  # cluster_id → central entity
         self.contradictions: list[dict] = []       # [(subj, pred, obj_a, obj_b), ...]
         self.last_run: float = 0
+        self._dual_a_consistency: float | None = None  # 锚4 全局缓存 (一次 consolidation 只算一次)
 
     def consolidate(self) -> dict:
         """
         执行一次完整的记忆巩固循环。
 
-        返回: { clusters_found, contradictions_found, edges_decayed }
+        返回: { clusters_found, contradictions_found, edges_decayed, promoted_to_a, growth }
         """
         result = {"clusters_found": 0, "contradictions_found": 0, "edges_decayed": 0}
 
@@ -60,8 +63,109 @@ class MemoryConsolidation:
         resolved = self._resolve_contradictions()
         result["contradictions_resolved"] = resolved
 
+        # 5. ★ v3.9 ID-024③: B→A 升级 — 四锚外部验证 (不可自指) ★
+        promoted = self._promote_to_tier_a()
+        result["promoted_to_a"] = promoted
+
+        # 6. ★ v3.9 ID-024④: 增长模型 W(t) — 边数/tier 分布快照 (S 型实证数据) ★
+        result["growth"] = self._growth_snapshot()
+
         self.last_run = time.time()
         return result
+
+    # ── ID-024③: B→A 四锚升级 (A 层准入只认外部锚, 不可自指) ──
+    def _promote_to_tier_a(self) -> int:
+        """B 层边 → A 层: 四锚 OR (任一满足即升级)
+
+        锚1 用户 confirmed ≥ 3 次 (cognitive_traces 计数)
+        锚2 批判者熵 < 0.5 (该实体知识结构清晰)
+        锚3 黑盒 co_text 共现支持 (energy ≥ 0.3)
+        锚4 双向判读方向A 一致率 ≥ 0.7 (ID-018, 全局黑盒贴合度)
+
+        闸门自己打的分不算数 — 四锚全部来自外部 (用户/熵/黑盒/双向判读)
+        """
+        if not self.star_map or not hasattr(self.star_map, "conn"):
+            return 0
+        conn = self.star_map.conn
+        promoted = 0
+        rows = conn.execute(
+            "SELECT source, relation, target FROM directed_edges "
+            "WHERE tier='B' AND relation != 'co_text'").fetchall()
+        if not rows:
+            return 0
+
+        # 锚4 全局一致率只算一次
+        if self._dual_a_consistency is None:
+            self._dual_a_consistency = self._anchor4_global()
+        a4 = self._dual_a_consistency
+
+        for subj, rel, obj in rows:
+            if self._check_anchors(subj, rel, obj, a4):
+                conn.execute(
+                    "UPDATE directed_edges SET tier='A' "
+                    "WHERE source=? AND relation=? AND target=?",
+                    (subj, rel, obj))
+                promoted += 1
+        if promoted:
+            conn.commit()
+        return promoted
+
+    def _anchor4_global(self) -> float | None:
+        """锚4: 双向判读方向A 一致率 (ID-018) — 无 concept 时跳过"""
+        if not self.concept or not hasattr(self.concept, "dual_check"):
+            return None
+        try:
+            dual = self.concept.dual_check(sample=6)
+            return dual["direction_a_whitebox_to_blackbox"]["consistency"]
+        except Exception:
+            return None
+
+    def _check_anchors(self, subj: str, rel: str, obj: str,
+                       a4: float | None) -> bool:
+        """四锚 OR — 任一满足即通过 (各自独立阈值)"""
+        conn = self.star_map.conn
+        # 锚1: 用户 confirmed ≥ 3 次
+        n_conf = conn.execute(
+            "SELECT COUNT(*) FROM cognitive_traces "
+            "WHERE subj=? AND pred=? AND obj=? AND feedback='confirmed'",
+            (subj, rel, obj)).fetchone()[0]
+        if n_conf >= 3:
+            return True
+        # 锚2: 批判者熵 < 0.5 (该实体知识结构清晰)
+        if self.critic and hasattr(self.critic, "entropy_of"):
+            try:
+                if self.critic.entropy_of(subj) < 0.5:
+                    return True
+            except Exception:
+                pass
+        # 锚3: 黑盒 co_text 共现支持 (energy ≥ 0.3)
+        co = conn.execute(
+            "SELECT energy FROM directed_edges "
+            "WHERE source=? AND target=? AND relation='co_text'",
+            (subj, obj)).fetchone()
+        if co and (co[0] or 0) >= 0.3:
+            return True
+        # 锚4: 双向判读方向A 一致率 ≥ 0.7
+        if a4 is not None and a4 >= 0.7:
+            return True
+        return False
+
+    # ── ID-024④: 增长模型 W(t) 快照 (S 型实证数据) ──
+    def _growth_snapshot(self) -> dict:
+        """W(t) = 命名边总数 + tier 分布 — 供 S 型曲线实证 (带宽/候选池/噪声/饱和)"""
+        if not self.star_map or not hasattr(self.star_map, "conn"):
+            return {}
+        conn = self.star_map.conn
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM directed_edges WHERE relation != 'co_text'").fetchone()[0]
+            tier_a = conn.execute(
+                "SELECT COUNT(*) FROM directed_edges WHERE tier='A'").fetchone()[0]
+            tier_b = conn.execute(
+                "SELECT COUNT(*) FROM directed_edges WHERE tier='B'").fetchone()[0]
+            return {"W": total, "tier_a": tier_a, "tier_b": tier_b}
+        except Exception:
+            return {}
 
     def _resolve_contradictions(self) -> int:
         """每个矛盾: 保留证据强度高的关系, 相反关系降权
@@ -105,18 +209,21 @@ class MemoryConsolidation:
             for rel in rels:
                 if rel != best_rel:
                     loser = self.star_map.conn.execute(
-                        "SELECT energy, weight FROM directed_edges "
+                        "SELECT energy, weight, tier FROM directed_edges "
                         "WHERE source=? AND relation=? AND target=?",
                         (subj, rel, obj)).fetchone()
                     if not loser:
                         continue
-                    loser_energy, loser_weight = loser
+                    loser_energy, loser_weight, loser_tier = loser
                     floor = 0.2 * (loser_weight or 1)
                     self.star_map.conn.execute(
-                        "UPDATE directed_edges SET energy=MAX(energy*0.5, ?) "
+                        "UPDATE directed_edges SET energy=MAX(energy*0.5, ?), "
+                        "tier=CASE WHEN tier='A' THEN 'B' ELSE tier END "
                         "WHERE source=? AND relation=? AND target=?",
                         (floor, subj, rel, obj))
-                    resolved += 1
+                    # ★ v3.9 ID-024③: A→B 降级 — A 层非终身制, 被反证调和即降级
+                    if loser_tier == "A":
+                        resolved += 1
         if resolved:
             self.star_map.conn.commit()
         return resolved

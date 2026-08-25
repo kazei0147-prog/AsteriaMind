@@ -264,7 +264,8 @@ class MotherController:
 
         if action == "fact_learn":
             if subj and pred and obj and self.star_map:
-                self.star_map.store(subj, pred, obj, "confirmed", text)
+                # ★ v3.9 ID-024②: 用户亲口教 → 直送 A 层核心骨架
+                self.star_map.store(subj, pred, obj, "confirmed", text, source="teach")
                 self.active_inference.update_from_feedback(subj, pred, obj, True)
                 cognitive_output["evidence"] = [f"{subj} {pred} {obj} (新学习)"]
 

@@ -28,6 +28,11 @@ def _build_cooccur_from_traces(conn: sqlite3.Connection):
             # 从已有 count 初始化
             cur.execute("UPDATE co_occurrence SET evidence_count=count, confidence=1.0, last_update=0")
             conn.commit()
+        # ★ v3.9 ID-024③: directed_edges 加 tier 列 (A=核心骨架/B=毛坯候选), 旧库 ALTER
+        de_cols = {r[1] for r in conn.execute("PRAGMA table_info(directed_edges)")}
+        if "tier" not in de_cols:
+            cur.execute("ALTER TABLE directed_edges ADD COLUMN tier TEXT DEFAULT 'B'")
+            conn.commit()
         return
 
     cur.execute("""
@@ -50,6 +55,7 @@ def _build_cooccur_from_traces(conn: sqlite3.Connection):
             confidence REAL DEFAULT 1.0,
             evidence_count INTEGER DEFAULT 1,
             last_update REAL DEFAULT 0,
+            tier TEXT DEFAULT 'B',
             PRIMARY KEY (source, target, relation)
         )
     """)
@@ -145,10 +151,13 @@ def _is_valid_entity_pair(source: str, target: str) -> bool:
 
 
 def _incr_directed(cur, source: str, target: str, relation: str = "",
-                    feedback: str = "confirmed", ts: float = 0):
+                    feedback: str = "confirmed", ts: float = 0,
+                    tier: str = "B"):
     """有向边: source →[relation]→ target, 保留方向和关系类型
 
     ★ v3.6: 质量门 — 命名边入口处过滤残片/虚词, 避免星图被垃圾污染
+    ★ v3.9 ID-024③: tier 列 — A=核心骨架(外部锚验证) / B=毛坯候选(宽松进入)
+      ON CONFLICT 时 A 优先: 任何来源一次 teach 即升 A, learn 不降级 (降级只走 consolidation)
     """
     if not source or not target or source == target:
         return
@@ -163,14 +172,15 @@ def _incr_directed(cur, source: str, target: str, relation: str = "",
     conf_boost = 1.0 if feedback == "confirmed" else (0.3 if feedback == "corrected" else 0.5)
     ts = ts or time.time()
     cur.execute(
-        "INSERT INTO directed_edges(source,target,relation,weight,confidence,evidence_count,last_update) "
-        "VALUES(?,?,?,1,?,1,?) "
+        "INSERT INTO directed_edges(source,target,relation,weight,confidence,evidence_count,last_update,tier) "
+        "VALUES(?,?,?,1,?,1,?,?) "
         "ON CONFLICT(source,target,relation) DO UPDATE SET "
         "weight=weight+1, "
         "confidence=(confidence*evidence_count+?)/(evidence_count+1), "
         "evidence_count=evidence_count+1, "
-        "last_update=?",
-        (source, target, relation, conf_boost, ts, conf_boost, ts))
+        "last_update=?, "
+        "tier=CASE WHEN tier='A' OR excluded.tier='A' THEN 'A' ELSE 'B' END",
+        (source, target, relation, conf_boost, ts, tier, conf_boost, ts))
 
 
 def _incr_co_text(cur, a: str, b: str, ts: float = 0):
@@ -416,6 +426,7 @@ class CognitiveStarMap:
                     source TEXT NOT NULL, target TEXT NOT NULL, relation TEXT DEFAULT '',
                     weight INTEGER DEFAULT 1, confidence REAL DEFAULT 1.0,
                     evidence_count INTEGER DEFAULT 1, last_update REAL DEFAULT 0,
+                    tier TEXT DEFAULT 'B',
                     PRIMARY KEY (source, target, relation)
                 )
             """)
@@ -432,6 +443,12 @@ class CognitiveStarMap:
             cols = {r[1] for r in c.execute("PRAGMA table_info(directed_edges)")}
             if "energy" not in cols:
                 c.execute("ALTER TABLE directed_edges ADD COLUMN energy REAL DEFAULT 1.0")
+        # ★ v3.9 ID-024③: tier 列迁移 (A=核心骨架/B=毛坯候选)
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='directed_edges'")
+        if c.fetchone():
+            cols = {r[1] for r in c.execute("PRAGMA table_info(directed_edges)")}
+            if "tier" not in cols:
+                c.execute("ALTER TABLE directed_edges ADD COLUMN tier TEXT DEFAULT 'B'")
         # v3.6: 连接词学习表 (语言痕迹)
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='relation_connectors'")
         if not c.fetchone():
@@ -714,9 +731,9 @@ class CognitiveStarMap:
         scored = []
         for row in self.conn.execute(
             "SELECT target, relation, weight, confidence, "
-            "COALESCE(energy, 1.0) FROM directed_edges WHERE source=?",
+            "COALESCE(energy, 1.0), COALESCE(tier, 'B') FROM directed_edges WHERE source=?",
             (subj,)):
-            target, rel, weight, conf, edge_energy = row
+            target, rel, weight, conf, edge_energy, tier = row
 
             # ★ v3.6: 空间过滤 (合并后单图, 全看得到)
             # ★ v3.9 F16: belief 空间加入 CAUSES/NOT_CAUSES/OPPOSITE (瓶颈一: 元逻辑骨架)
@@ -755,6 +772,7 @@ class CognitiveStarMap:
                 "energy": round(edge_energy, 3),
                 "salience": round(salience, 3),
                 "confidence": conf,
+                "tier": tier,
             })
 
         # 排序并去重 (同目标保留最高分)
@@ -773,8 +791,12 @@ class CognitiveStarMap:
         return result[:top_k]
 
     def store(self, subj: str, pred: str, obj: str,
-              feedback: str = "confirmed", text: str = "") -> int:
-        """存入认知痕迹 + 语言痕迹 + 更新共现"""
+              feedback: str = "confirmed", text: str = "",
+              source: str = "learn") -> int:
+        """存入认知痕迹 + 语言痕迹 + 更新共现
+
+        ★ v3.9 ID-024②: source 分岔 — 教(teach)直送 A 层核心骨架 / 学(learn)进 B 层毛坯候选
+        """
         subj = (subj or "").strip()
         pred = (pred or "").strip()
         obj = (obj or "").strip()
@@ -796,7 +818,8 @@ class CognitiveStarMap:
                 (text, subj, pred, obj, cog_id, lt, stype, time.time()))
         # 有向边: subj →[pred]→ obj
         ts = time.time()
-        _incr_directed(self.conn.cursor(), subj, obj, pred, feedback, ts)
+        tier = "A" if source == "teach" else "B"
+        _incr_directed(self.conn.cursor(), subj, obj, pred, feedback, ts, tier)
         self.conn.commit()
         return cog_id
 

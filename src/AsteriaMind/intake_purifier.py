@@ -86,6 +86,6 @@ class IntakePurifier:
             return False, "这像是问句不是教学——教我用 'X 是 Y' 格式"
         if not _is_valid_entity_pair(subj, obj):
             return False, "实体不合格 (太短/虚词/残片)"
-        # 用户明确教学 → 高置信直接存
-        self.star_map.store(subj, rel, obj, "confirmed", "teach_intake")
+        # 用户明确教学 → 高置信直接存 (★ v3.9 ID-024②: 教 → 直送 A 层核心骨架)
+        self.star_map.store(subj, rel, obj, "confirmed", "teach_intake", source="teach")
         return True, "ok"
