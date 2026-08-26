@@ -172,7 +172,7 @@ class ThinkNode:
                 "SELECT relation FROM directed_edges WHERE source=? "
                 "AND relation IN ('NOT_CAN','NOT_IS_A','IS_A','CAN','HAS',"
                 "'EATS','LIVES_IN','ORBITS','CAUSES','NOT_CAUSES','OPPOSITE') "
-                "LIMIT 1", (subject,)).fetchone()
+                "ORDER BY (tier='A') DESC LIMIT 1", (subject,)).fetchone()
             if single_rel:
                 sr = single_rel[0]
                 # 因果/反因果同域: 问"导致什么" → NOT_CAUSES 边也可答

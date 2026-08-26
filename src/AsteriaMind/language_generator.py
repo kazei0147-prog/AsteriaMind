@@ -283,7 +283,8 @@ class LanguageGenerator:
                     break
             else:
                 for row in self.star_map.conn.execute(
-                    "SELECT relation FROM directed_edges WHERE source=? AND target=? LIMIT 1",
+                    "SELECT relation FROM directed_edges WHERE source=? AND target=? "
+                    "ORDER BY (tier='A') DESC, weight*confidence DESC LIMIT 1",
                     (subj, node)):
                     if row[0]: edges.append((node, row[0])); break
 
