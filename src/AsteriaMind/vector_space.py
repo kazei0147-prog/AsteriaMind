@@ -3,10 +3,12 @@ vector_space.py — AM 的向量空间 (黑盒语义层)
 =============================================
 从语料训练 word2vec → 存 SQLite → 提供语义近邻查询
 
-哲学:
-  预输入给分类 (白盒): 地球 IS_A 行星   ← 种子包教的
-  向量空间让她自己长分类 (黑盒): 从语料共现自动学
-    '天王星 ≈ 海王星 ≈ 木星' 不用人教, 她能从向量距离自己猜
+哲学 (2026-09-02 审计后修正):
+  黑盒(向量空间) = 快而糙的 grounding: 应建立在真实大规模中文向量底座上
+                   (fastText / 腾讯等), 而非 68万字自训。
+  白盒(符号图谱) = 独立"法庭": 验证 / 纠错 / 细粒度知识, 能不同意黑盒。
+  ★ 关键修正: 白盒 IS_A 边【禁止】灌进黑盒训练 (那是循环论证 + 错误放大),
+    黑盒训练只吃语料; 白盒边只作验证约束 (court) 或可选的特化约束。
 
 表: word_vectors(word TEXT PRIMARY KEY, vector BLOB, dim INT)
 API: /api/vector?word=X → 语义近邻 top10
@@ -55,11 +57,12 @@ def tokenize(text: str) -> list:
 
 
 def _named_edge_sentences(db: str = _DB) -> list:
-    """白盒知识反哺: 命名边 → 句子 (地球 是 行星 → 加入训练语料)
+    """白盒知识 → 句子 (地球 是 行星)。
 
-    让我们教她的知识 (IS_A/CAN/HAS/EATS...) 变成向量学习的养料
-    ★ v3.9: 加入 CAUSES/NOT_CAUSES/OPPOSITE — 元常识种子 (天上下雨→地面变湿)
-      此前漏了这三个, 元常识只在白盒 (星图) 不在黑盒 (词表), 反哺断了一条腿
+    ⚠️ 2026-09-02 审计后: 此函数【不再】喂进黑盒训练 (那是污染 + 循环论证)。
+    保留作「特化约束源」: 供白盒模块把 IS_A / 非IS_A 当 ATTRACT/REPEL 约束,
+    施加在黑盒向量之上 (ATTRACT-REPEL / LEAR 思路), 做细粒度上下位特化。
+    粗粒度 grounding 靠真实底座 (见 load_pretrained), 不需要此函数。
     """
     conn = sqlite3.connect(db)
     rows = conn.execute(
@@ -108,9 +111,11 @@ def train(corpus_dir: str = _CORPUS_DIR, dim: int = _DIM,
             toks = tokenize(sent)
             if len(toks) >= 3:
                 sentences.append(toks)
-    # 白盒知识反哺: 命名边句子加入语料 (核心词重复出现 → 向量可靠)
-    sentences += _named_edge_sentences()
-    print(f"句子: {len(sentences)}")
+    # ★ 2026-09-02 审计修正: 移除「白盒边灌训练」(原 _named_edge_sentences)。
+    #   审计发现: 那会让黑盒 = 白盒的向量化压缩版 → 双盒不独立, "法庭"退化为自言自语,
+    #   且 27% 旁支泄漏把白盒错误放大进黑盒。黑盒训练只吃语料。
+    #   白盒 IS_A 边的正确用途 = 验证约束(court) / 可选特化约束, 见 load_pretrained + 白盒模块。
+    print(f"句子: {len(sentences)} (纯语料, 无白盒污染)")
 
     t0 = time.time()
     model = Word2Vec(sentences, vector_size=dim, window=5,
@@ -133,6 +138,50 @@ def store(model, db: str = _DB, dim: int = _DIM):
                          rows)
     conn.close()
     print(f"存入 {len(rows)} 词向量 → {db}")
+
+
+# ── 3.5 加载真实底座 (2026-09-02 审计后新增) ──
+def load_pretrained(vec_path: str, db: str = _DB, topn: int = None,
+                    dim: int = None):
+    """用真实大规模中文向量 (fastText / 腾讯 .vec 或 .vec.gz) 替换 word_vectors 表。
+
+    审计结论: AM 原 word2vec 只在 68万字语料上自训 → 饿死; 且把白盒边灌进训练 → 污染。
+    正确底座是真实大语料预训练向量 (本机已下 fastText cc.zh.300.vec.gz,
+    在 59 概念外部真值测试上 AUC=0.82)。本函数流式读取, 维度以文件为准 (不限 128)。
+
+    ⚠️ 此操作 REPLACE word_vectors 表 (清空旧向量), 调用前请确认已备份。
+    """
+    import gzip
+    opener = gzip.open if vec_path.endswith(".gz") else open
+    mode = "rt" if vec_path.endswith(".gz") else "r"
+    n, kept = 0, 0
+    rows, dim_actual = [], dim
+    t0 = time.time()
+    with opener(vec_path, mode, encoding="utf-8", errors="ignore") as f:
+        f.readline()  # header: "n_words dim"
+        for line in f:
+            n += 1
+            sp = line.rstrip("\n").split(" ")
+            if len(sp) < 3:
+                continue
+            vec = np.array(sp[1:], dtype=np.float32)
+            if dim_actual is None:
+                dim_actual = int(vec.shape[0])
+            elif vec.shape[0] != dim_actual:
+                continue
+            rows.append((sp[0], vec.tobytes(), dim_actual))
+            kept += 1
+            if topn and kept >= topn:
+                break
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE IF EXISTS word_vectors")
+    conn.execute("CREATE TABLE word_vectors("
+                 "word TEXT PRIMARY KEY, vector BLOB, dim INT)")
+    with conn:
+        conn.executemany("INSERT OR REPLACE INTO word_vectors VALUES (?,?,?)", rows)
+    conn.close()
+    print(f"载入真实底座: {kept} 词 / {dim_actual}维, 扫 {n} 行, 用时 {time.time()-t0:.0f}s → {db}")
+    return kept
 
 
 # ── 4. 查询 ──
@@ -219,6 +268,13 @@ if __name__ == "__main__":
     if mode == "train":
         m = train()
         store(m)
+    elif mode == "loadpretrained":
+        p = sys.argv[2] if len(sys.argv) > 2 else None
+        tn = int(sys.argv[3]) if len(sys.argv) > 3 else None
+        if not p:
+            print("用法: python vector_space.py loadpretrained <vec_path[.gz]> [topn]")
+        else:
+            load_pretrained(p, topn=tn)
     elif mode == "query":
         vs = VectorSpace()
         for w in sys.argv[2:]:
