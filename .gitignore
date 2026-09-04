@@ -39,3 +39,8 @@ debug.log
 
 # Auto-generated scripts (broken)
 *.ps1
+
+# Court probe experiment artifacts (keep only *.py under experiments/court_probe/)
+experiments/court_probe/*.log
+experiments/court_probe/*.jsonl
+experiments/court_probe/*.md
