@@ -126,6 +126,8 @@ def main():
         print(f"[!] 印记库不存在: {LIB}")
         return
     items = [json.loads(l) for l in open(LIB, encoding="utf-8") if l.strip()]
+    # 印记库是 jsonl 混合：印记 + record_hit 事件。事件无 qid，分析器只关心印记。
+    items = [i for i in items if "event" not in i]
     if not items:
         print("[!] 印记库为空")
         return

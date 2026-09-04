@@ -240,13 +240,42 @@ class LLM:
                                            ensure_ascii=False) + "\n")
                     return {"c": "", "r": reasoning}
                 break
-            except Exception as e:
-                if attempt == retries:
-                    print(f"  [api-err] {attempt + 1} 次均失败 "
-                          f"{type(e).__name__}: {e}", flush=True)
+            except urllib.error.HTTPError as e:
+                # 错误必须分类，否则陷入 429+重试 死循环（实测：1.5h 内 30+ 条
+                # query 各烧 5+ 分钟，纯属自杀）
+                if e.code == 429:
+                    wait = min(60 * (2 ** attempt), 240)  # 60s/120s/240s 封顶
+                    print(f"  [429 限流] attempt {attempt + 1}/{retries + 1}，"
+                          f"等 {wait}s 后重取…", flush=True)
+                    if attempt < retries:
+                        time.sleep(wait)
+                    else:
+                        print(f"  [api-err] 429 重试耗尽: {e.reason}", flush=True)
+                        return {"c": "", "r": ""}
+                elif e.code in (500, 502, 503, 504):
+                    wait = 5 * (3 ** attempt)  # 5s/15s/45s
+                    print(f"  [{e.code}] attempt {attempt + 1}，退避 {wait}s…",
+                          flush=True)
+                    if attempt < retries:
+                        time.sleep(wait)
+                    else:
+                        print(f"  [api-err] {e.code} 重试耗尽", flush=True)
+                        return {"c": "", "r": ""}
+                else:
+                    # 4xx（除 429）：客户端错，重试无意义
+                    print(f"  [http-{e.code}] 不重试: {e.reason}", flush=True)
                     return {"c": "", "r": ""}
-                print(f"  [retry {attempt + 1}] {type(e).__name__}，重取…", flush=True)
-                time.sleep(3)
+            except Exception as e:
+                # timeout / connection refused 等：指数退避
+                wait = 5 * (3 ** attempt)
+                print(f"  [{type(e).__name__}] attempt {attempt + 1}/{retries + 1}，"
+                      f"退避 {wait}s…", flush=True)
+                if attempt < retries:
+                    time.sleep(wait)
+                else:
+                    print(f"  [api-err] 重试耗尽 {type(e).__name__}: {e}",
+                          flush=True)
+                    return {"c": "", "r": ""}
         self.n_call += 1
         self.cache[prompt] = {"c": content, "r": reasoning}
         with open(self.cache_file, "a", encoding="utf-8") as f:
